@@ -4,6 +4,10 @@ import subprocess
 from pathlib import Path
 
 
+_VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+_VALID_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
 class ConfigManager:
     _HAIVE_DIR = Path.home() / ".haive"
     _CONFIGS_DIR = _HAIVE_DIR / "configs"
@@ -37,7 +41,8 @@ class ConfigManager:
         cls._ACTIVE_FILE.write_text("default")
 
     @classmethod
-    def active_name(cls) -> str | None:
+    def _peek_active_name(cls) -> str | None:
+        """Return the active config name without any bootstrapping side effects."""
         if not cls._ACTIVE_FILE.exists():
             return None
         name = cls._ACTIVE_FILE.read_text().strip()
@@ -45,6 +50,11 @@ class ConfigManager:
 
     @classmethod
     def create(cls, name: str) -> None:
+        if not _VALID_NAME.match(name):
+            raise ValueError(
+                f"Invalid config name '{name}'. "
+                "Use letters, digits, hyphens, and underscores only (must start with a letter or digit)."
+            )
         cls._ensure_dirs()
         path = cls._CONFIGS_DIR / f"{name}.env"
         if path.exists():
@@ -65,6 +75,12 @@ class ConfigManager:
 
     @classmethod
     def set_value(cls, key: str, value: str) -> None:
+        if not _VALID_KEY.match(key):
+            raise ValueError(
+                f"Invalid key '{key}'. Keys must be UPPER_SNAKE_CASE (e.g. GITHUB_TOKEN)."
+            )
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"Value for '{key}' must not contain newlines.")
         config_path = Path(cls.active_config_path())
         content = config_path.read_text()
         lines = content.splitlines() if content.strip() else []

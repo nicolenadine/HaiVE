@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,8 +59,8 @@ class Settings(BaseSettings):
     ollama_api_base: str = "http://localhost:11434"
 
     # Adapter selection
-    pm_adapter: str = "github"
-    vcs_adapter: str = "github"
+    pm_adapter: Literal["github"] = "github"
+    vcs_adapter: Literal["github"] = "github"
 
     # GitHub (required when either adapter is "github")
     github_token: str | None = None
@@ -77,6 +77,10 @@ class Settings(BaseSettings):
             if not self.github_repo:
                 raise ValueError(
                     "GITHUB_REPO is required when using the GitHub adapter"
+                )
+            if not self.github_project_id:
+                raise ValueError(
+                    "GITHUB_PROJECT_ID is required when using the GitHub adapter"
                 )
         return self
 

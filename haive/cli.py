@@ -17,7 +17,7 @@ def config_create(name: str = typer.Argument(..., help="Name for the new config.
     try:
         ConfigManager.create(name)
         typer.echo(f"Created config '{name}'. Run 'haive config use {name}' to activate it.")
-    except FileExistsError as e:
+    except (ValueError, FileExistsError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
@@ -39,8 +39,12 @@ def config_set(
     value: str = typer.Argument(..., help="Value to set."),
 ) -> None:
     """Set a KEY=VALUE in the active config."""
-    ConfigManager.set_value(key, value)
-    typer.echo(f"Set {key} in active config.")
+    try:
+        ConfigManager.set_value(key, value)
+        typer.echo(f"Set {key} in active config.")
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
 
 
 @config_app.command("edit")
@@ -64,7 +68,7 @@ def config_show() -> None:
 def config_list() -> None:
     """List all named configs. The active config is marked with *."""
     configs = ConfigManager.list_configs()
-    active = ConfigManager.active_name()
+    active = ConfigManager._peek_active_name()
     if not configs:
         typer.echo("No configs found. Run 'haive config create <name>' to create one.")
         return
