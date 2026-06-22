@@ -23,6 +23,7 @@ class _CsvDotEnvSource(DotEnvSettingsSource):
 
 
 class Settings(BaseSettings):
+    # TODO : revert hard coded values back to env
     model_config = SettingsConfigDict(extra="ignore")
 
     # Orchestrator
@@ -94,7 +95,7 @@ class Settings(BaseSettings):
             env_file=dotenv_settings.env_file,
             env_file_encoding=dotenv_settings.env_file_encoding,
         )
-        return (init_settings, env_settings, csv_dotenv, file_secret_settings)
+        return (init_settings, csv_dotenv, env_settings, file_secret_settings)
 
 
 def load_settings() -> Settings:
