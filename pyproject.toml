@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "haive"
+version = "0.1.0"
+description = "Multi-provider AI agent harness for software development"
+requires-python = ">=3.11"
+dependencies = [
+    "litellm",
+    "pydantic>=2.0",
+    "pydantic-settings",
+    "typer",
+    "pytest",
+    "duckdb",
+    "tree-sitter",
+    "opentelemetry-sdk",
+    "openinference-instrumentation-litellm",
+    "arize-phoenix",
+    "PyGithub",
+    "filelock",
+]
+
+[project.scripts]
+haive = "haive.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
