@@ -310,6 +310,22 @@ class TestStartupValidation:
                 with pytest.raises(RuntimeError, match="not found"):
                     GitHubPMAdapter(_fake_settings())
 
+    def test_missing_github_token_raises_value_error(self):
+        with pytest.raises(ValueError, match="GITHUB_TOKEN"):
+            GitHubPMAdapter(_fake_settings(github_token=None))
+
+    def test_missing_github_repo_raises_value_error(self):
+        with pytest.raises(ValueError, match="GITHUB_REPO"):
+            GitHubPMAdapter(_fake_settings(github_repo=None))
+
+    def test_missing_project_id_raises_value_error(self):
+        with pytest.raises(ValueError, match="GITHUB_PROJECT_ID"):
+            GitHubPMAdapter(_fake_settings(github_project_id=None))
+
+    def test_malformed_github_repo_raises_value_error(self):
+        with pytest.raises(ValueError, match="owner/repo"):
+            GitHubPMAdapter(_fake_settings(github_repo="just-a-repo-name"))
+
 
 # ---------------------------------------------------------------------------
 # TestGetBlockedBy

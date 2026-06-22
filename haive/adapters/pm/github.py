@@ -58,6 +58,16 @@ class _GitHubMilestone(BaseModel):
 
 class GitHubPMAdapter:
     def __init__(self, settings: Settings) -> None:
+        if not settings.github_token:
+            raise ValueError("GitHubPMAdapter requires GITHUB_TOKEN in settings.")
+        if not settings.github_repo:
+            raise ValueError("GitHubPMAdapter requires GITHUB_REPO in settings.")
+        if not settings.github_project_id:
+            raise ValueError("GitHubPMAdapter requires GITHUB_PROJECT_ID in settings.")
+        if "/" not in settings.github_repo:
+            raise ValueError(
+                f"GITHUB_REPO must be in 'owner/repo' format, got: {settings.github_repo!r}"
+            )
         self._token = settings.github_token
         self._owner, self._repo_name = settings.github_repo.split("/", 1)
         self._project_number = settings.github_project_id
