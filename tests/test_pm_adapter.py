@@ -82,7 +82,7 @@ def _issue_node(
     lineage_depth: int = 0,
     recovery_for: str | None = None,
     acceptance_criteria: str = "Works\nTests pass",
-    milestone: dict | None = None,
+    milestone_number: int | None = 7,  # default matches get_tasks("7")
 ) -> dict:
     return {
         "content": {
@@ -90,7 +90,7 @@ def _issue_node(
             "number": number,
             "title": title,
             "body": body,
-            "milestone": milestone,
+            "milestone": {"number": milestone_number} if milestone_number is not None else None,
         },
         "fieldValues": {
             "nodes": [
@@ -120,6 +120,47 @@ def _relationships(*blocking_numbers: int) -> dict:
             }
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# TestGetProject
+# ---------------------------------------------------------------------------
+
+class TestGetProject:
+    def test_returns_project_from_milestone(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        ms.title = "Add authentication"
+        ms.description = "OAuth2 flow for the API"
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        project = adapter.get_project("7")
+
+        adapter._repo_obj.get_milestone.assert_called_once_with(7)
+        assert project.project_id == "7"
+        assert project.title == "Add authentication"
+        assert project.description == "OAuth2 flow for the API"
+        assert project.project_branch == "haive/project-7"
+
+    def test_project_branch_derived_from_milestone_id(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        ms.title = "Sprint 3"
+        ms.description = ""
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        project = adapter.get_project("3")
+        assert project.project_branch == "haive/project-3"
+
+    def test_none_description_becomes_empty_string(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        ms.title = "No desc"
+        ms.description = None
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        project = adapter.get_project("1")
+        assert project.description == ""
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +235,28 @@ class TestGetTasks:
         ]
         tasks = adapter.get_tasks("7")
         assert [t.task_id for t in tasks] == ["1", "2"]
+
+    def test_filters_to_milestone(self):
+        adapter = _make_adapter()
+        # issue 10 belongs to milestone 7; issue 20 belongs to milestone 99
+        adapter._graphql.side_effect = [
+            _items_page([
+                _issue_node(number=10, issue_id="I_10", milestone_number=7),
+                _issue_node(number=20, issue_id="I_20", milestone_number=99),
+            ]),
+            _no_relationships(),  # blocked_by only called for issue 10
+        ]
+        tasks = adapter.get_tasks("7")
+        assert len(tasks) == 1
+        assert tasks[0].task_id == "10"
+
+    def test_excludes_issues_with_no_milestone(self):
+        adapter = _make_adapter()
+        adapter._graphql.side_effect = [
+            _items_page([_issue_node(number=5, milestone_number=None)]),
+        ]
+        tasks = adapter.get_tasks("7")
+        assert tasks == []
 
 
 # ---------------------------------------------------------------------------

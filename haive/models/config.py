@@ -65,7 +65,8 @@ class Settings(BaseSettings):
     # GitHub (required when either adapter is "github")
     github_token: str | None = None
     github_repo: str | None = None
-    github_project_id: int | None = None
+    github_project_id: int | None = None      # Projects v2 board number — shared, set once
+    github_milestone_id: int | None = None    # default milestone for haive run (optional; --project overrides)
 
     @model_validator(mode="after")
     def validate_github_credentials(self) -> "Settings":

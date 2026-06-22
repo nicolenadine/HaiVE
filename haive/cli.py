@@ -96,14 +96,14 @@ def _check_active_config() -> None:
         raise typer.Exit(code=1)
 
 
-def _resolve_project_id(cli_value: str | None) -> str:
+def _resolve_milestone_id(cli_value: str | None) -> str:
     if cli_value is not None:
         return cli_value
-    config_value = ConfigManager.get_value("GITHUB_PROJECT_ID")
+    config_value = ConfigManager.get_value("GITHUB_MILESTONE_ID")
     if config_value:
         return config_value
     typer.echo(
-        "Error: No project ID specified. Pass --project <id> or set GITHUB_PROJECT_ID in your active config.",
+        "Error: No milestone specified. Pass --project <milestone> or set GITHUB_MILESTONE_ID in your active config.",
         err=True,
     )
     raise typer.Exit(code=1)
@@ -121,13 +121,13 @@ def run(
     project: str | None = typer.Option(
         None,
         "--project",
-        help="GitHub Project ID to run. Overrides GITHUB_PROJECT_ID in config.",
+        help="GitHub milestone number to run. Overrides GITHUB_MILESTONE_ID in config.",
     ),
 ) -> None:
-    """Run the haive agent harness for a project."""
+    """Run the haive agent harness for a milestone."""
     _preflight_checks()
-    project_id = _resolve_project_id(project)
-    typer.echo(f"haive run --project {project_id}: not implemented yet.")
+    milestone_id = _resolve_milestone_id(project)
+    typer.echo(f"haive run --project {milestone_id}: not implemented yet.")
     raise typer.Exit(code=0)
 
 

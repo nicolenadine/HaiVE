@@ -76,7 +76,7 @@ class GitHubPMAdapter:
         self._project_node_id: str | None = None
         self._validate_custom_fields()
 
-    def _graphql(self, query: str, variables: dict) -> dict:
+    def _graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         resp = requests.post(
             _GRAPHQL_URL,
             json={"query": query, "variables": variables},
@@ -115,8 +115,9 @@ class GitHubPMAdapter:
             raise RuntimeError(
                 f"GitHub Project #{self._project_number} not found for owner '{self._owner}'."
             )
-        self._project_node_id = project["id"]
-        return self._project_node_id
+        node_id: str = project["id"]
+        self._project_node_id = node_id
+        return node_id
 
     def _validate_custom_fields(self) -> None:
         node_id = self._resolve_project_node_id()
@@ -169,7 +170,7 @@ class GitHubPMAdapter:
             if rel.get("type") == "IS_BLOCKED_BY"
         ]
 
-    def _extract_field_values(self, field_value_nodes: list[dict]) -> dict[str, Any]:
+    def _extract_field_values(self, field_value_nodes: list[dict[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for node in field_value_nodes:
             field_name = node.get("field", {}).get("name", "")
@@ -199,7 +200,7 @@ class GitHubPMAdapter:
             lineage_depth=issue.haive_lineage_depth,
         )
 
-    def _fetch_project_items(self) -> list[dict]:
+    def _fetch_project_items(self) -> list[dict[str, Any]]:
         node_id = self._resolve_project_node_id()
         query = """
         query($projectId: ID!, $after: String) {
@@ -239,7 +240,7 @@ class GitHubPMAdapter:
           }
         }
         """
-        items: list[dict] = []
+        items: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
             data = self._graphql(query, {"projectId": node_id, "after": cursor})
@@ -251,33 +252,25 @@ class GitHubPMAdapter:
         return items
 
     def get_project(self, project_id: str) -> Project:
-        node_id = self._resolve_project_node_id()
-        query = """
-        query($projectId: ID!) {
-          node(id: $projectId) {
-            ... on ProjectV2 { title shortDescription }
-          }
-        }
-        """
-        data = self._graphql(query, {"projectId": node_id})
-        proj = data["node"]
-        branch = f"haive/project-{project_id}"
-        for ms in self._repo_obj.get_milestones(state="open"):
-            if ms.title == branch:
-                break
+        ms = self._repo_obj.get_milestone(int(project_id))
         return Project(
             project_id=project_id,
-            title=proj.get("title", ""),
-            description=proj.get("shortDescription") or "",
-            project_branch=branch,
+            title=ms.title,
+            description=ms.description or "",
+            project_branch=f"haive/project-{project_id}",
         )
 
     def get_tasks(self, project_id: str) -> list[Task]:
+        milestone_number = int(project_id)
         raw_items = self._fetch_project_items()
         tasks: list[Task] = []
         for item in raw_items:
             content = item.get("content")
             if not content or "number" not in content:
+                continue
+            # Only include issues assigned to this milestone
+            item_milestone = content.get("milestone")
+            if not item_milestone or item_milestone.get("number") != milestone_number:
                 continue
             fields = self._extract_field_values(item.get("fieldValues", {}).get("nodes", []))
             issue_node_id = content["id"]
