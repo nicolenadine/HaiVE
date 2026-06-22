@@ -8,7 +8,7 @@ class TestTaskStatus:
             "pending",
             "in_progress",
             "complete",
-            "needs-human-review",
+            "needs_human_review",
             "blocked",
             "skipped",
         }
@@ -22,7 +22,7 @@ class TestTaskStatus:
 
     def test_deserializes_from_string(self):
         assert TaskStatus("in_progress") is TaskStatus.IN_PROGRESS
-        assert TaskStatus("needs-human-review") is TaskStatus.NEEDS_HUMAN_REVIEW
+        assert TaskStatus("needs_human_review") is TaskStatus.NEEDS_HUMAN_REVIEW
 
 
 class TestAgentRole:
