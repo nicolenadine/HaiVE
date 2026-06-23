@@ -251,11 +251,11 @@ class GitHubIssue(BaseModel):
     title:               str
     body:                str       # human-readable description only — no embedded metadata
     gh_status:           str       # raw GitHub Project status field value
-    blocked_by:          list[int] # native GH "blocked by" issue numbers
     milestone_id:        int
     # haive custom fields (from GitHub Projects v2 GraphQL API):
     haive_agent_role:          str        # raw single-select value
     haive_complexity:          str        # raw single-select value
+    haive_depends_on:          str        # comma-separated issue numbers (e.g. "1, 3")
     haive_lineage_depth:       int
     haive_recovery_for:        str | None # task_id of the task being recovered
     haive_acceptance_criteria: str        # newline-separated text
@@ -268,7 +268,7 @@ class GitHubMilestone(BaseModel):
     project_branch: str   # e.g. "haive/project-7"
 ```
 
-`GitHubPMAdapter.get_tasks()` reads the five `haive_*` custom fields via the GitHub Projects GraphQL API and maps them to the domain `Task` fields. On startup, `GitHubPMAdapter` queries the Project's field schema and exits with a clear error listing any of the five required fields that are not present.
+`GitHubPMAdapter.get_tasks()` reads the six `haive_*` custom fields via the GitHub Projects GraphQL API and maps them to the domain `Task` fields. On startup, `GitHubPMAdapter` queries the Project's field schema and exits with a clear error listing any of the six required fields that are not present.
 
 Custom field names on the GitHub Project:
 
@@ -276,6 +276,7 @@ Custom field names on the GitHub Project:
 |---|---|
 | `haive_agent_role` | Single select — one option per `AgentRole` enum value |
 | `haive_complexity` | Single select — `low`, `medium`, `high` |
+| `haive_depends_on` | Text — comma-separated issue numbers (e.g. `"1, 3"`); empty if no dependencies |
 | `haive_lineage_depth` | Number |
 | `haive_recovery_for` | Text |
 | `haive_acceptance_criteria` | Text (newline-separated list) |
@@ -323,7 +324,7 @@ class NewTask(BaseModel):
     description:         str
     agent_role:          AgentRole
     complexity:          Complexity
-    depends_on:          list[str] = Field(default_factory=list)   # task_ids
+    depends_on:          list[str] = Field(default_factory=list)   # see depends_on format below
     acceptance_criteria: list[str]
     recovery_for:        str | None = None
     lineage_depth:       int = 0
@@ -334,6 +335,15 @@ class OrchestratorOutput(BaseModel):
 ```
 
 When `done=True`, `new_tasks` must be empty. When `done=False` and `new_tasks` is empty, this is treated as a configuration error — the orchestrator must always produce some output.
+
+#### `depends_on` format
+
+Each entry in `NewTask.depends_on` is a string in one of two formats:
+
+- **Existing task ID** — a GitHub issue number for a task that already exists: `"42"`
+- **Intra-wave positional ref** — a reference to another task being created in the same `OrchestratorOutput.new_tasks` list: `"new:0"`, `"new:1"`, etc., where the number is the zero-based index of the target task
+
+This allows the orchestrator to express a complete dependency graph in a single wave rather than requiring multiple `haive run` invocations. The CLI resolves positional refs to real GitHub issue numbers during task creation (creating tasks in list order, building an index map as it goes) before calling `set_dependency`.
 
 Escalation is not an orchestrator output — it happens automatically when the executor exhausts retries (PM Adapter updates status and posts comment). The orchestrator simply sees the task in `needs-human-review` status on the next run and decides whether to create a recovery task.
 

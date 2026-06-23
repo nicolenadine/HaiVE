@@ -14,6 +14,7 @@ from haive.models.task import Project, Task, TaskComment
 _REQUIRED_CUSTOM_FIELDS = frozenset({
     "haive_agent_role",
     "haive_complexity",
+    "haive_depends_on",
     "haive_lineage_depth",
     "haive_recovery_for",
     "haive_acceptance_criteria",
@@ -38,7 +39,7 @@ class _GitHubIssue(BaseModel):
     title:                     str
     body:                      str
     gh_status:                 str
-    blocked_by:                list[int]
+    haive_depends_on:          str = ""
     milestone_id:              int | None
     haive_agent_role:          str
     haive_complexity:          str
@@ -146,29 +147,6 @@ class GitHubPMAdapter:
                 "Add these fields to the project before running haive."
             )
 
-    def _get_blocked_by(self, issue_node_id: str) -> list[int]:
-        query = """
-        query($issueId: ID!) {
-          node(id: $issueId) {
-            ... on Issue {
-              issueRelationships(first: 50) {
-                nodes {
-                  type
-                  relatedIssue { number }
-                }
-              }
-            }
-          }
-        }
-        """
-        data = self._graphql(query, {"issueId": issue_node_id})
-        relationships = data["node"].get("issueRelationships", {}).get("nodes", [])
-        return [
-            rel["relatedIssue"]["number"]
-            for rel in relationships
-            if rel.get("type") == "IS_BLOCKED_BY"
-        ]
-
     def _extract_field_values(self, field_value_nodes: list[dict[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for node in field_value_nodes:
@@ -192,7 +170,7 @@ class GitHubPMAdapter:
             description=issue.body,
             agent_role=AgentRole(issue.haive_agent_role),
             complexity=Complexity(issue.haive_complexity),
-            depends_on=[str(n) for n in issue.blocked_by],
+            depends_on=[s.strip() for s in issue.haive_depends_on.split(",") if s.strip()],
             acceptance_criteria=criteria,
             status=status,
             recovery_for=issue.haive_recovery_for or None,
@@ -272,16 +250,14 @@ class GitHubPMAdapter:
             if not item_milestone or item_milestone.get("number") != milestone_number:
                 continue
             fields = self._extract_field_values(item.get("fieldValues", {}).get("nodes", []))
-            issue_node_id = content["id"]
-            blocked_by = self._get_blocked_by(issue_node_id)
             milestone = content.get("milestone")
             gh_issue = _GitHubIssue(
-                issue_node_id=issue_node_id,
+                issue_node_id=content["id"],
                 issue_number=content["number"],
                 title=content.get("title", ""),
                 body=content.get("body", ""),
                 gh_status=fields.get("Status", "pending"),
-                blocked_by=blocked_by,
+                haive_depends_on=fields.get("haive_depends_on") or "",
                 milestone_id=milestone["number"] if milestone else None,
                 haive_agent_role=fields.get("haive_agent_role", ""),
                 haive_complexity=fields.get("haive_complexity", "low"),

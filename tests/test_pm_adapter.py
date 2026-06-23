@@ -24,6 +24,7 @@ _ALL_FIELDS_RESPONSE = {
             "nodes": [
                 {"name": "haive_agent_role"},
                 {"name": "haive_complexity"},
+                {"name": "haive_depends_on"},
                 {"name": "haive_lineage_depth"},
                 {"name": "haive_recovery_for"},
                 {"name": "haive_acceptance_criteria"},
@@ -82,7 +83,8 @@ def _issue_node(
     lineage_depth: int = 0,
     recovery_for: str | None = None,
     acceptance_criteria: str = "Works\nTests pass",
-    milestone_number: int | None = 7,  # default matches get_tasks("7")
+    depends_on: str = "",                       # comma-separated issue numbers
+    milestone_number: int | None = 7,           # default matches get_tasks("7")
 ) -> dict:
     return {
         "content": {
@@ -100,25 +102,9 @@ def _issue_node(
                 {"number": lineage_depth, "field": {"name": "haive_lineage_depth"}},
                 {"text": recovery_for, "field": {"name": "haive_recovery_for"}},
                 {"text": acceptance_criteria, "field": {"name": "haive_acceptance_criteria"}},
+                {"text": depends_on,   "field": {"name": "haive_depends_on"}},
             ]
         },
-    }
-
-
-def _no_relationships() -> dict:
-    return {"node": {"issueRelationships": {"nodes": []}}}
-
-
-def _relationships(*blocking_numbers: int) -> dict:
-    return {
-        "node": {
-            "issueRelationships": {
-                "nodes": [
-                    {"type": "IS_BLOCKED_BY", "relatedIssue": {"number": n}}
-                    for n in blocking_numbers
-                ]
-            }
-        }
     }
 
 
@@ -170,10 +156,7 @@ class TestGetProject:
 class TestGetTasks:
     def test_maps_all_task_fields_correctly(self):
         adapter = _make_adapter()
-        adapter._graphql.side_effect = [
-            _items_page([_issue_node()]),
-            _no_relationships(),
-        ]
+        adapter._graphql.side_effect = [_items_page([_issue_node()])]
         tasks = adapter.get_tasks("7")
         assert len(tasks) == 1
         t = tasks[0]
@@ -188,11 +171,10 @@ class TestGetTasks:
         assert t.lineage_depth == 0
         assert t.recovery_for is None
 
-    def test_maps_depends_on_from_blocked_by(self):
+    def test_maps_depends_on_from_field(self):
         adapter = _make_adapter()
         adapter._graphql.side_effect = [
-            _items_page([_issue_node(number=10)]),
-            _relationships(5, 7),
+            _items_page([_issue_node(number=10, depends_on="5, 7")]),
         ]
         tasks = adapter.get_tasks("7")
         assert tasks[0].depends_on == ["5", "7"]
@@ -201,7 +183,6 @@ class TestGetTasks:
         adapter = _make_adapter()
         adapter._graphql.side_effect = [
             _items_page([_issue_node(recovery_for="8", lineage_depth=2)]),
-            _no_relationships(),
         ]
         t = adapter.get_tasks("7")[0]
         assert t.recovery_for == "8"
@@ -226,25 +207,17 @@ class TestGetTasks:
             }
         }
         page2 = _items_page([_issue_node(number=2, issue_id="I_2")])
-        # _fetch_project_items exhausts all pages before _get_blocked_by is called
-        adapter._graphql.side_effect = [
-            page1,
-            page2,
-            _no_relationships(),  # blocked_by for issue 1
-            _no_relationships(),  # blocked_by for issue 2
-        ]
+        adapter._graphql.side_effect = [page1, page2]
         tasks = adapter.get_tasks("7")
         assert [t.task_id for t in tasks] == ["1", "2"]
 
     def test_filters_to_milestone(self):
         adapter = _make_adapter()
-        # issue 10 belongs to milestone 7; issue 20 belongs to milestone 99
         adapter._graphql.side_effect = [
             _items_page([
                 _issue_node(number=10, issue_id="I_10", milestone_number=7),
                 _issue_node(number=20, issue_id="I_20", milestone_number=99),
             ]),
-            _no_relationships(),  # blocked_by only called for issue 10
         ]
         tasks = adapter.get_tasks("7")
         assert len(tasks) == 1
@@ -275,8 +248,6 @@ class TestReadNewComments:
 
     def test_returns_comments_for_issues_in_project(self):
         adapter = _make_adapter()
-        adapter._graphql.return_value = _items_page([_issue_node(number=10)])["node"]["items"]
-        # Override: _fetch_project_items is what actually uses _graphql
         adapter._graphql.side_effect = [_items_page([_issue_node(number=10)])]
         now = datetime(2026, 6, 22, tzinfo=timezone.utc)
         comment = self._mock_comment("alice", "LGTM", now)
@@ -333,6 +304,7 @@ class TestStartupValidation:
                     "nodes": [
                         {"name": "haive_agent_role"},
                         # haive_complexity intentionally absent
+                        {"name": "haive_depends_on"},
                         {"name": "haive_lineage_depth"},
                         {"name": "haive_recovery_for"},
                         {"name": "haive_acceptance_criteria"},
@@ -354,8 +326,8 @@ class TestStartupValidation:
                 with pytest.raises(RuntimeError) as exc_info:
                     GitHubPMAdapter(_fake_settings())
         msg = str(exc_info.value)
-        for field in ("haive_agent_role", "haive_complexity", "haive_lineage_depth",
-                      "haive_recovery_for", "haive_acceptance_criteria"):
+        for field in ("haive_agent_role", "haive_complexity", "haive_depends_on",
+                      "haive_lineage_depth", "haive_recovery_for", "haive_acceptance_criteria"):
             assert field in msg
 
     def test_all_fields_present_initializes_cleanly(self):
@@ -366,7 +338,7 @@ class TestStartupValidation:
         assert adapter._project_node_id == "PVT_kgTest"
 
     def test_project_not_found_raises_runtime_error(self):
-        not_found = {"repository": {"owner": {}}}  # no projectV2 key
+        not_found = {"repository": {"owner": {}}}
         gql = self._make_gql_fn([not_found])
         with patch("haive.adapters.pm.github.github.Github"):
             with patch.object(GitHubPMAdapter, "_graphql", lambda self, q, v: gql(q, v)):
@@ -391,40 +363,12 @@ class TestStartupValidation:
 
 
 # ---------------------------------------------------------------------------
-# TestGetBlockedBy
+# TestAdapterBoundaries
 # ---------------------------------------------------------------------------
 
-class TestGetBlockedBy:
-    def test_returns_issue_numbers_for_is_blocked_by(self):
-        adapter = _make_adapter()
-        adapter._graphql.return_value = _relationships(3, 7)
-        result = adapter._get_blocked_by("I_kgNode")
-        assert result == [3, 7]
-
-    def test_ignores_other_relationship_types(self):
-        adapter = _make_adapter()
-        adapter._graphql.return_value = {
-            "node": {
-                "issueRelationships": {
-                    "nodes": [
-                        {"type": "BLOCKS", "relatedIssue": {"number": 99}},
-                        {"type": "IS_BLOCKED_BY", "relatedIssue": {"number": 5}},
-                        {"type": "DUPLICATE_OF", "relatedIssue": {"number": 88}},
-                    ]
-                }
-            }
-        }
-        result = adapter._get_blocked_by("I_kgNode")
-        assert result == [5]
-
-    def test_returns_empty_list_when_no_relationships(self):
-        adapter = _make_adapter()
-        adapter._graphql.return_value = _no_relationships()
-        result = adapter._get_blocked_by("I_kgNode")
-        assert result == []
-
+class TestAdapterBoundaries:
     def test_no_component_outside_adapters_imports_pygithub(self):
-        import importlib, sys
+        import sys
         for mod_name, mod in list(sys.modules.items()):
             if mod_name.startswith("haive.") and not mod_name.startswith("haive.adapters"):
                 source = getattr(mod, "__file__", "") or ""
