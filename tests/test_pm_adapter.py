@@ -6,6 +6,16 @@ import pytest
 from haive.adapters.pm.github import GitHubPMAdapter
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 
+_FIELD_IDS: dict[str, str] = {
+    "Status":                    "F_status",
+    "haive_agent_role":          "F_agent_role",
+    "haive_complexity":          "F_complexity",
+    "haive_depends_on":          "F_depends_on",
+    "haive_lineage_depth":       "F_lineage_depth",
+    "haive_recovery_for":        "F_recovery_for",
+    "haive_acceptance_criteria": "F_acceptance_criteria",
+}
+
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -57,6 +67,10 @@ def _make_adapter() -> GitHubPMAdapter:
     adapter._gh = MagicMock()
     adapter._repo_obj = MagicMock()
     adapter._graphql = MagicMock()
+    adapter._field_ids = _FIELD_IDS.copy()
+    adapter._status_option_ids = {s.value: f"OPT_{s.value}" for s in TaskStatus}
+    adapter._agent_role_option_ids = {r.value: f"OPT_{r.value}" for r in AgentRole}
+    adapter._complexity_option_ids = {c.value: f"OPT_{c.value}" for c in Complexity}
     return adapter
 
 
@@ -377,3 +391,174 @@ class TestAdapterBoundaries:
                         content = f.read()
                     assert "import github" not in content and "from github" not in content, \
                         f"{mod_name} must not import PyGithub"
+
+
+# ---------------------------------------------------------------------------
+# TestCreateTask
+# ---------------------------------------------------------------------------
+
+class TestCreateTask:
+    def _make_task(self, **overrides: object) -> MagicMock:
+        t = MagicMock()
+        t.title = overrides.get("title", "Build the thing")
+        t.description = overrides.get("description", "Do the work")
+        t.agent_role = overrides.get("agent_role", AgentRole.SCAFFOLD_AGENT)
+        t.complexity = overrides.get("complexity", Complexity.LOW)
+        t.lineage_depth = overrides.get("lineage_depth", 0)
+        t.recovery_for = overrides.get("recovery_for", None)
+        t.acceptance_criteria = overrides.get("acceptance_criteria", ["Works"])
+        return t
+
+    def _add_response(self) -> dict:
+        return {"addProjectV2ItemById": {"item": {"id": "PVTI_item1"}}}
+
+    def _update_response(self) -> dict:
+        return {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
+
+    def test_creates_issue_and_returns_task_id(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        adapter._repo_obj.get_milestone.return_value = ms
+        gh_issue = MagicMock()
+        gh_issue.number = 42
+        gh_issue.raw_data = {"node_id": "I_node42"}
+        adapter._repo_obj.create_issue.return_value = gh_issue
+        adapter._graphql.side_effect = [self._add_response()] + [self._update_response()] * 6
+
+        task_id = adapter.create_task("1", self._make_task())
+
+        assert task_id == "42"
+        adapter._repo_obj.create_issue.assert_called_once_with(
+            title="Build the thing",
+            body="Do the work",
+            milestone=ms,
+        )
+
+    def test_makes_seven_graphql_calls(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestone.return_value = MagicMock()
+        gh_issue = MagicMock()
+        gh_issue.number = 1
+        gh_issue.raw_data = {"node_id": "I_node1"}
+        adapter._repo_obj.create_issue.return_value = gh_issue
+        adapter._graphql.side_effect = [self._add_response()] + [self._update_response()] * 6
+
+        adapter.create_task("1", self._make_task())
+
+        assert adapter._graphql.call_count == 7  # 1 add + 6 field updates
+
+    def test_acceptance_criteria_joined_with_newline(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestone.return_value = MagicMock()
+        gh_issue = MagicMock()
+        gh_issue.number = 1
+        gh_issue.raw_data = {"node_id": "I_node1"}
+        adapter._repo_obj.create_issue.return_value = gh_issue
+
+        calls: list[dict] = []
+        def capture(q: str, v: dict) -> dict:
+            calls.append(v)
+            if "addProjectV2ItemById" in q:
+                return self._add_response()
+            return self._update_response()
+        adapter._graphql.side_effect = capture
+
+        adapter.create_task("1", self._make_task(acceptance_criteria=["Step A", "Step B"]))
+
+        criteria_call = calls[-1]
+        assert criteria_call["value"] == {"text": "Step A\nStep B"}
+
+    def test_lineage_depth_passed_as_float(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestone.return_value = MagicMock()
+        gh_issue = MagicMock()
+        gh_issue.number = 1
+        gh_issue.raw_data = {"node_id": "I_node1"}
+        adapter._repo_obj.create_issue.return_value = gh_issue
+
+        calls: list[dict] = []
+        def capture(q: str, v: dict) -> dict:
+            calls.append(v)
+            if "addProjectV2ItemById" in q:
+                return self._add_response()
+            return self._update_response()
+        adapter._graphql.side_effect = capture
+
+        adapter.create_task("1", self._make_task(lineage_depth=3))
+
+        lineage_call = next(c for c in calls if c.get("value") == {"number": 3.0})
+        assert lineage_call["fieldId"] == "F_lineage_depth"
+
+
+# ---------------------------------------------------------------------------
+# TestSetDependency
+# ---------------------------------------------------------------------------
+
+class TestSetDependency:
+    def test_updates_haive_depends_on_with_comma_joined_ids(self):
+        adapter = _make_adapter()
+        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
+        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
+
+        adapter.set_dependency("42", ["1", "3"])
+
+        call_vars = adapter._graphql.call_args[0][1]
+        assert call_vars["value"] == {"text": "1, 3"}
+        assert call_vars["fieldId"] == "F_depends_on"
+
+    def test_empty_depends_on_sets_empty_string(self):
+        adapter = _make_adapter()
+        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
+        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
+
+        adapter.set_dependency("42", [])
+
+        call_vars = adapter._graphql.call_args[0][1]
+        assert call_vars["value"] == {"text": ""}
+
+
+# ---------------------------------------------------------------------------
+# TestUpdateStatus
+# ---------------------------------------------------------------------------
+
+class TestUpdateStatus:
+    def test_sets_correct_option_id_for_status(self):
+        adapter = _make_adapter()
+        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
+        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
+
+        adapter.update_status("42", TaskStatus.IN_PROGRESS)
+
+        call_vars = adapter._graphql.call_args[0][1]
+        assert call_vars["fieldId"] == "F_status"
+        assert call_vars["value"] == {"singleSelectOptionId": "OPT_in_progress"}
+
+    def test_each_status_value_maps_to_its_option_id(self):
+        adapter = _make_adapter()
+        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
+        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
+
+        for status in TaskStatus:
+            adapter._graphql.reset_mock()
+            adapter.update_status("1", status)
+            call_vars = adapter._graphql.call_args[0][1]
+            assert call_vars["value"] == {"singleSelectOptionId": f"OPT_{status.value}"}
+
+
+# ---------------------------------------------------------------------------
+# TestAddComment
+# ---------------------------------------------------------------------------
+
+class TestAddComment:
+    def test_creates_comment_on_issue(self):
+        adapter = _make_adapter()
+
+        adapter.add_comment("42", "Great work!")
+
+        adapter._repo_obj.get_issue.assert_called_once_with(42)
+        adapter._repo_obj.get_issue.return_value.create_comment.assert_called_once_with("Great work!")
+
+    def test_task_id_parsed_as_int(self):
+        adapter = _make_adapter()
+        adapter.add_comment("7", "Done")
+        adapter._repo_obj.get_issue.assert_called_once_with(7)
