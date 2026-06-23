@@ -24,7 +24,6 @@ def _make_settings(**overrides):
     s = MagicMock()
     s.anthropic_api_key = overrides.get("anthropic_api_key", None)
     s.openai_api_key = overrides.get("openai_api_key", None)
-    s.orchestrator_model = overrides.get("orchestrator_model", "orchestrator-model")
     s.reviewer_models = overrides.get("reviewer_models", ["reviewer-model"])
     s.tier_low_models = overrides.get("tier_low_models", ["low-model"])
     s.tier_low_max_attempts = overrides.get("tier_low_max_attempts", 2)
@@ -138,9 +137,9 @@ class TestTierConfig:
         assert config.high.max_attempts == 4
         assert config.high.context_budget == 32000
 
-    def test_orchestrator_tier_wraps_single_model(self):
+    def test_orchestrator_tier_uses_high_tier_models(self):
         config = TierConfig.from_settings(_make_settings())
-        assert config.orchestrator.models == ["orchestrator-model"]
+        assert config.orchestrator.models == ["high-model-a", "high-model-b"]
         assert config.orchestrator.max_attempts == 1
 
     def test_reviewer_tier_uses_reviewer_models(self):
