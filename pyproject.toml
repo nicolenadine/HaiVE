@@ -20,6 +20,7 @@ dependencies = [
     "arize-phoenix",
     "PyGithub",
     "filelock",
+    "pyyaml",
 ]
 
 [project.scripts]

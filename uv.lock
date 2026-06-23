@@ -1314,6 +1314,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pygithub" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "tree-sitter" },
     { name = "typer" },
 ]
@@ -1330,6 +1331,7 @@ requires-dist = [
     { name = "pydantic-settings" },
     { name = "pygithub" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "tree-sitter" },
     { name = "typer" },
 ]

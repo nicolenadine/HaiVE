@@ -1,10 +1,12 @@
 from typing import Any, Literal
 
-from pydantic import ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources.base import PydanticBaseSettingsSource
 from pydantic_settings.sources.providers.dotenv import DotEnvSettingsSource
 from pydantic.fields import FieldInfo
+
+from haive.models.enums import AgentRole
 
 
 class _CsvDotEnvSource(DotEnvSettingsSource):
@@ -112,3 +114,16 @@ def load_settings() -> Settings:
     except ValidationError as e:
         e.add_note(f"Config file: {config_path}")
         raise
+
+
+class AgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role:               AgentRole
+    description:        str = Field(min_length=1)
+    skills:             list[str] = Field(min_length=1)
+    system_prompt_path: str = Field(min_length=1)
+    output_schema_path: str = Field(min_length=1)
+    max_tokens:         int = Field(gt=0)
+    retry_limit:        int = Field(ge=0)
+    prompt_version:     str = Field(min_length=1)
