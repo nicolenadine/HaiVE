@@ -296,6 +296,26 @@ class TestReadNewComments:
         adapter.read_new_comments("7", self._since)
         adapter._repo_obj.get_issue.return_value.get_comments.assert_called_once_with(since=self._since)
 
+    def test_excludes_comments_from_other_milestones(self):
+        adapter = _make_adapter()
+        adapter._graphql.side_effect = [
+            _items_page([
+                _issue_node(number=10, issue_id="I_10", milestone_number=7),
+                _issue_node(number=20, issue_id="I_20", milestone_number=99),
+            ])
+        ]
+        now = datetime(2026, 6, 22, tzinfo=timezone.utc)
+        def get_issue_side_effect(n):
+            m = MagicMock()
+            m.get_comments.return_value = [self._mock_comment("alice", f"comment on {n}", now)]
+            return m
+        adapter._repo_obj.get_issue.side_effect = get_issue_side_effect
+
+        comments = adapter.read_new_comments("7", self._since)
+
+        assert len(comments) == 1
+        assert comments[0].task_id == "10"
+
 
 # ---------------------------------------------------------------------------
 # TestStartupValidation

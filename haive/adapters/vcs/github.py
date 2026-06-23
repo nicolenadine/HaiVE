@@ -78,10 +78,7 @@ class GitHubVCSAdapter:
           }) { pullRequest { number } }
         }
         """
-        try:
-            self._graphql(mutation, {"pullRequestId": pr_node_id})
-        except RuntimeError:
-            pr.merge(merge_method="squash")
+        self._graphql(mutation, {"pullRequestId": pr_node_id})
 
     def add_pr_comment(self, pr_id: str, body: str) -> None:
         self._repo_obj.get_pull(int(pr_id)).create_issue_comment(body)

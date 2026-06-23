@@ -286,11 +286,15 @@ class GitHubPMAdapter:
         return tasks
 
     def read_new_comments(self, project_id: str, since: datetime) -> list[TaskComment]:
+        milestone_number = int(project_id)
         raw_items = self._fetch_project_items()
         comments: list[TaskComment] = []
         for item in raw_items:
             content = item.get("content")
             if not content or "number" not in content:
+                continue
+            item_milestone = content.get("milestone")
+            if not item_milestone or item_milestone.get("number") != milestone_number:
                 continue
             issue_number = content["number"]
             gh_issue = self._repo_obj.get_issue(issue_number)

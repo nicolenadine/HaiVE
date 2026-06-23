@@ -134,16 +134,17 @@ class TestMergePR:
         call_vars = adapter._graphql.call_args[0][1]
         assert call_vars["pullRequestId"] == "PR_node7"
 
-    def test_falls_back_to_direct_merge_if_automerge_unavailable(self):
+    def test_propagates_error_if_automerge_fails(self):
         adapter = _make_adapter()
         pr = MagicMock()
         pr.raw_data = {"node_id": "PR_node7"}
         adapter._repo_obj.get_pull.return_value = pr
-        adapter._graphql.side_effect = RuntimeError("auto-merge not enabled on repo")
+        adapter._graphql.side_effect = RuntimeError("auto-merge not available")
 
-        adapter.merge_pr("7")
+        with pytest.raises(RuntimeError, match="auto-merge not available"):
+            adapter.merge_pr("7")
 
-        pr.merge.assert_called_once_with(merge_method="squash")
+        pr.merge.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

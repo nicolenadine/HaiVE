@@ -1,5 +1,6 @@
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -111,7 +112,10 @@ class ConfigManager:
     @classmethod
     def edit(cls) -> None:
         editor = os.environ.get("EDITOR", "nano")
-        subprocess.run([editor, cls.active_config_path()])
+        try:
+            subprocess.run([*shlex.split(editor), cls.active_config_path()], check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Editor exited with error (code {e.returncode}).") from e
 
     @classmethod
     def show(cls) -> dict[str, str]:
