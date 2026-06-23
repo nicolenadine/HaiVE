@@ -3,8 +3,10 @@ from __future__ import annotations
 import litellm
 
 from haive.llm.errors import APIError
+from haive.llm.model_response import ModelResponse
 from haive.llm.tier import Tier
 from haive.models.config import Settings
+from haive.models.task import TokenUsage
 
 
 class ModelClient:
@@ -14,7 +16,7 @@ class ModelClient:
         if settings.openai_api_key:
             litellm.openai_api_key = settings.openai_api_key
 
-    def call(self, tier: Tier, prompt: str, system: str, max_tokens: int) -> str:
+    def call(self, tier: Tier, prompt: str, system: str, max_tokens: int) -> ModelResponse:
         primary = tier.models[0]
         fallbacks = tier.models[1:] or None
         try:
@@ -33,4 +35,20 @@ class ModelClient:
 
         if not response.choices or response.choices[0].message.content is None:
             raise APIError("LiteLLM returned an empty or malformed response.")
-        return response.choices[0].message.content
+
+        content = response.choices[0].message.content
+        model_used = getattr(response, "model", None) or primary
+
+        token_usage: TokenUsage | None = None
+        usage = getattr(response, "usage", None)
+        if usage:
+            try:
+                token_usage = TokenUsage(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                )
+            except (AttributeError, TypeError):
+                pass
+
+        return ModelResponse(content=content, model_used=model_used, token_usage=token_usage)
