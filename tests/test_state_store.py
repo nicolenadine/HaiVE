@@ -87,6 +87,13 @@ class TestSave:
 # ---------------------------------------------------------------------------
 
 class TestMergeTaskRecord:
+    def test_creates_state_if_file_missing(self, tmp_path):
+        store = _make_store(tmp_path)
+        store.merge_task_record("5", "task-X", _make_record("task-X"))
+        state = store.load_or_init("5")
+        assert state.project_id == "5"
+        assert "task-X" in state.tasks
+
     def test_concurrent_writes_produce_valid_state(self, tmp_path):
         store = _make_store(tmp_path)
         store.load_or_init("1")

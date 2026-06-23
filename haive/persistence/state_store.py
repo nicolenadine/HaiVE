@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,7 +34,7 @@ class StateStore:
                 state = ProjectState(project_id=project_id, created_at=now, updated_at=now)
                 self._write(state)
                 return state
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             raw = json.loads(text)
             version = raw.get("schema_version")
             if version != CURRENT_SCHEMA_VERSION:
@@ -53,7 +54,11 @@ class StateStore:
     ) -> None:
         with FileLock(self._lock_path(project_id)):
             path = self._state_path(project_id)
-            state = ProjectState.model_validate_json(path.read_text())
+            if path.exists():
+                state = ProjectState.model_validate_json(path.read_text(encoding="utf-8"))
+            else:
+                now = datetime.now(tz=timezone.utc)
+                state = ProjectState(project_id=project_id, created_at=now, updated_at=now)
             state.tasks[task_id] = record
             state.updated_at = datetime.now(tz=timezone.utc)
             self._write(state)
@@ -61,5 +66,5 @@ class StateStore:
     def _write(self, state: ProjectState) -> None:
         path = self._state_path(state.project_id)
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(state.model_dump_json(indent=2))
-        tmp.rename(path)
+        tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(tmp, path)

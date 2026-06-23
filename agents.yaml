@@ -5,8 +5,8 @@ scaffold_agent:
     - "write boilerplate files"
     - "initialize configuration files"
     - "set up package structure"
-  system_prompt_path: "prompts/scaffold_agent.md"
-  output_schema_path: "schemas/scaffold_output.json"
+  system_prompt: "prompts/scaffold_agent.md"
+  output_schema: "schemas/scaffold_output.json"
   max_tokens: 4096
   retry_limit: 2
   prompt_version: "1.0"
@@ -18,8 +18,8 @@ implementation_agent:
     - "write production-quality code"
     - "follow existing code patterns"
     - "handle edge cases and error paths"
-  system_prompt_path: "prompts/implementation_agent.md"
-  output_schema_path: "schemas/implementation_output.json"
+  system_prompt: "prompts/implementation_agent.md"
+  output_schema: "schemas/implementation_output.json"
   max_tokens: 8192
   retry_limit: 2
   prompt_version: "1.0"
@@ -31,8 +31,8 @@ code_editor_agent:
     - "preserve surrounding context"
     - "follow file-local conventions"
     - "avoid unrelated reformatting"
-  system_prompt_path: "prompts/code_editor_agent.md"
-  output_schema_path: "schemas/code_editor_output.json"
+  system_prompt: "prompts/code_editor_agent.md"
+  output_schema: "schemas/code_editor_output.json"
   max_tokens: 4096
   retry_limit: 2
   prompt_version: "1.0"
@@ -44,8 +44,8 @@ refactoring_agent:
     - "rename for clarity"
     - "remove duplication"
     - "simplify control flow"
-  system_prompt_path: "prompts/refactoring_agent.md"
-  output_schema_path: "schemas/refactoring_output.json"
+  system_prompt: "prompts/refactoring_agent.md"
+  output_schema: "schemas/refactoring_output.json"
   max_tokens: 8192
   retry_limit: 2
   prompt_version: "1.0"
@@ -57,8 +57,8 @@ api_integration_agent:
     - "implement adapter patterns"
     - "map external schemas to internal models"
     - "handle authentication and retries"
-  system_prompt_path: "prompts/api_integration_agent.md"
-  output_schema_path: "schemas/api_integration_output.json"
+  system_prompt: "prompts/api_integration_agent.md"
+  output_schema: "schemas/api_integration_output.json"
   max_tokens: 8192
   retry_limit: 2
   prompt_version: "1.0"
@@ -70,8 +70,8 @@ database_agent:
     - "write migrations"
     - "implement repository or DAO patterns"
     - "write efficient queries"
-  system_prompt_path: "prompts/database_agent.md"
-  output_schema_path: "schemas/database_output.json"
+  system_prompt: "prompts/database_agent.md"
+  output_schema: "schemas/database_output.json"
   max_tokens: 8192
   retry_limit: 2
   prompt_version: "1.0"
@@ -83,8 +83,8 @@ test_generator_agent:
     - "write integration tests"
     - "identify edge cases and failure modes"
     - "mock external dependencies"
-  system_prompt_path: "prompts/test_generator_agent.md"
-  output_schema_path: "schemas/test_generator_output.json"
+  system_prompt: "prompts/test_generator_agent.md"
+  output_schema: "schemas/test_generator_output.json"
   max_tokens: 8192
   retry_limit: 2
   prompt_version: "1.0"
@@ -96,8 +96,8 @@ code_reviewer_agent:
     - "identify logic errors and edge cases"
     - "assess code style and readability"
     - "produce structured review verdicts"
-  system_prompt_path: "prompts/code_reviewer_agent.md"
-  output_schema_path: "schemas/review_verdict.json"
+  system_prompt: "prompts/code_reviewer_agent.md"
+  output_schema: "schemas/review_verdict.json"
   max_tokens: 4096
   retry_limit: 1
   prompt_version: "1.0"
@@ -109,8 +109,8 @@ security_reviewer_agent:
     - "detect insecure data handling"
     - "flag exposed secrets or credentials"
     - "assess authentication and authorisation logic"
-  system_prompt_path: "prompts/security_reviewer_agent.md"
-  output_schema_path: "schemas/review_verdict.json"
+  system_prompt: "prompts/security_reviewer_agent.md"
+  output_schema: "schemas/review_verdict.json"
   max_tokens: 4096
   retry_limit: 1
   prompt_version: "1.0"
@@ -122,8 +122,8 @@ documentation_writer_agent:
     - "author README sections"
     - "produce usage examples"
     - "document API contracts"
-  system_prompt_path: "prompts/documentation_writer_agent.md"
-  output_schema_path: "schemas/documentation_output.json"
+  system_prompt: "prompts/documentation_writer_agent.md"
+  output_schema: "schemas/documentation_output.json"
   max_tokens: 4096
   retry_limit: 2
   prompt_version: "1.0"

@@ -13,8 +13,8 @@ scaffold_agent:
   description: Creates project structure
   skills:
     - create directories
-  system_prompt_path: prompts/scaffold_agent.md
-  output_schema_path: schemas/scaffold_output.json
+  system_prompt: prompts/scaffold_agent.md
+  output_schema: schemas/scaffold_output.json
   max_tokens: 4096
   retry_limit: 2
   prompt_version: "1.0"
@@ -40,8 +40,8 @@ class TestLoad:
 scaffold_agent:
   skills:
     - do stuff
-  system_prompt_path: prompts/scaffold_agent.md
-  output_schema_path: schemas/scaffold_output.json
+  system_prompt: prompts/scaffold_agent.md
+  output_schema: schemas/scaffold_output.json
   max_tokens: 4096
   retry_limit: 2
   prompt_version: "1.0"
@@ -56,8 +56,8 @@ not_a_real_role:
   description: mystery agent
   skills:
     - ???
-  system_prompt_path: prompts/x.md
-  output_schema_path: schemas/x.json
+  system_prompt: prompts/x.md
+  output_schema: schemas/x.json
   max_tokens: 1024
   retry_limit: 0
   prompt_version: "1.0"

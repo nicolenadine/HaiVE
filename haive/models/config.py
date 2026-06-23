@@ -119,11 +119,12 @@ def load_settings() -> Settings:
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    role:               AgentRole
-    description:        str = Field(min_length=1)
-    skills:             list[str] = Field(min_length=1)
-    system_prompt_path: str = Field(min_length=1)
-    output_schema_path: str = Field(min_length=1)
-    max_tokens:         int = Field(gt=0)
-    retry_limit:        int = Field(ge=0)
-    prompt_version:     str = Field(min_length=1)
+    role:                      AgentRole
+    description:               str = Field(min_length=1)
+    skills:                    list[str] = Field(min_length=1)
+    system_prompt:             str = Field(min_length=1)
+    output_schema:             str = Field(min_length=1)
+    max_tokens:                int = Field(gt=0)
+    retry_limit:               int = Field(ge=0)
+    prompt_version:            str = Field(min_length=1)
+    context_budget_multiplier: float = Field(default=1.0, gt=0)
