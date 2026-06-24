@@ -4,6 +4,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from haive.models.enums import AgentRole, Complexity
+from haive.orchestration.example_tags import KNOWN_TAGS
 
 
 class ExampleTaskPattern(BaseModel):
@@ -12,7 +13,7 @@ class ExampleTaskPattern(BaseModel):
     agent_role:  AgentRole
     purpose:     str
     complexity:  Complexity
-    depends_on:  list[str] = Field(default_factory=list)
+    depends_on:  list[int] = Field(default_factory=list)
 
 
 class ExampleMiniTask(BaseModel):
@@ -21,7 +22,7 @@ class ExampleMiniTask(BaseModel):
     title:      str
     agent_role: AgentRole
     complexity: Complexity
-    depends_on: list[str] = Field(default_factory=list)
+    depends_on: list[int] = Field(default_factory=list)
 
 
 class ExampleMiniMilestone(BaseModel):
@@ -42,6 +43,16 @@ class OrchestratorExample(BaseModel):
     default_task_graph:   list[ExampleTaskPattern]
     common_wrong_outputs: list[str] = Field(default_factory=list)
     mini_example:         ExampleMiniMilestone | None = None
+
+    @model_validator(mode="after")
+    def check_known_tags(self) -> "OrchestratorExample":
+        unknown = [t for t in self.tags if t not in KNOWN_TAGS]
+        if unknown:
+            raise ValueError(
+                f"Unknown tag(s) in example '{self.id}': {unknown}. "
+                f"Valid tags: {sorted(KNOWN_TAGS)}"
+            )
+        return self
 
 
 class OrchestratorExampleLibrary(BaseModel):
@@ -72,6 +83,10 @@ class ExampleLibrary:
         except OSError as e:
             raise RuntimeError(f"Cannot read example library at '{path}': {e}") from e
 
+        if raw is None:
+            raise RuntimeError(
+                "Example library is empty; expected a root mapping with an 'examples' list."
+            )
         if not isinstance(raw, dict):
             raise RuntimeError(
                 f"orchestrator_examples.yaml must be a root-level mapping, got {type(raw).__name__}"
@@ -97,6 +112,9 @@ class ExampleLibrary:
 
 
 def format_examples_for_prompt(examples: list[OrchestratorExample]) -> str:
+    if not examples:
+        return ""
+
     sections: list[str] = ["## Relevant planning examples"]
 
     for ex in examples:
@@ -114,7 +132,7 @@ def format_examples_for_prompt(examples: list[OrchestratorExample]) -> str:
         lines.append("\nPattern:")
         for i, step in enumerate(ex.default_task_graph):
             if step.depends_on:
-                dep_labels = ", ".join(f"step {int(d) + 1}" for d in step.depends_on)
+                dep_labels = ", ".join(f"step {d + 1}" for d in step.depends_on)
                 dep_str = f"; depends on {dep_labels}"
             else:
                 dep_str = ""
@@ -132,7 +150,7 @@ def format_examples_for_prompt(examples: list[OrchestratorExample]) -> str:
             lines.append(f'\nExample: "{me.milestone}"')
             for i, t in enumerate(me.expected_tasks):
                 if t.depends_on:
-                    dep_labels = ", ".join(str(int(d) + 1) for d in t.depends_on)
+                    dep_labels = ", ".join(str(d + 1) for d in t.depends_on)
                     dep_str = f"  [depends: {dep_labels}]"
                 else:
                     dep_str = ""

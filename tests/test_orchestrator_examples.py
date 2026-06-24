@@ -36,7 +36,7 @@ _VALID_YAML = textwrap.dedent("""\
           - agent_role: test_generator_agent
             purpose: Add tests
             complexity: medium
-            depends_on: ["0"]
+            depends_on: [0]
         common_wrong_outputs:
           - Using implementation_agent for existing code
         mini_example:
@@ -49,7 +49,7 @@ _VALID_YAML = textwrap.dedent("""\
             - title: Add validation tests
               agent_role: test_generator_agent
               complexity: medium
-              depends_on: ["0"]
+              depends_on: [0]
 
       - id: test_pattern_b
         pattern_name: Pattern B
@@ -66,7 +66,7 @@ _VALID_YAML = textwrap.dedent("""\
           - agent_role: implementation_agent
             purpose: Fill in logic
             complexity: medium
-            depends_on: ["0"]
+            depends_on: [0]
         common_wrong_outputs:
           - Using code_editor_agent before files exist
 """)
@@ -133,6 +133,19 @@ _MISSING_FIELD_YAML = textwrap.dedent("""\
             depends_on: []
 """)
 
+_UNKNOWN_TAG_YAML = textwrap.dedent("""\
+    examples:
+      - id: bad_tag
+        pattern_name: Bad Tag
+        tags: [existing_code_edti]
+        use_when: [reason]
+        default_task_graph:
+          - agent_role: code_editor_agent
+            purpose: do something
+            complexity: medium
+            depends_on: []
+""")
+
 
 # ---------------------------------------------------------------------------
 # TestExampleLibraryLoading
@@ -176,6 +189,12 @@ class TestExampleLibraryLoading:
         lib = ExampleLibrary.load(str(p))
         with pytest.raises(ValueError, match="[Nn]o example"):
             lib.get("nonexistent")
+
+    def test_unknown_tag_raises(self, tmp_path):
+        p = tmp_path / "examples.yaml"
+        p.write_text(_UNKNOWN_TAG_YAML)
+        with pytest.raises(RuntimeError, match="[Uu]nknown tag"):
+            ExampleLibrary.load(str(p))
 
 
 # ---------------------------------------------------------------------------
@@ -299,9 +318,8 @@ class TestPromptFormatter:
         assert "use_when:" not in output
         assert "default_task_graph:" not in output
 
-    def test_empty_list_returns_header_only(self):
-        output = format_examples_for_prompt([])
-        assert "Relevant planning examples" in output
+    def test_empty_list_returns_empty_string(self):
+        assert format_examples_for_prompt([]) == ""
 
 
 # ---------------------------------------------------------------------------

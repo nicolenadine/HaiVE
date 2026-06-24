@@ -10,12 +10,12 @@ _TAG_KEYWORDS: dict[str, list[str]] = {
     "cli_change":                ["cli", "command", "typer", "flag"],
     "database_migration":        ["migration", "schema change", "alter table"],
     "security_sensitive":        ["security", "auth", "secret", "vulnerability", "permission"],
-    "review_artifact_requested": ["review", "audit", "findings"],
+    "review_artifact_requested": ["standalone review", "review artifact", "audit report", "findings report", "security audit"],
     "docs_required":             ["readme", "docs", "documentation", "docstring"],
     "new_module":                ["new module", "new package", "new class", "introduce"],
     "refactor_only":             ["refactor", "rename", "restructure", "clean up", "simplify"],
     "external_api_integration":  ["api integration", "webhook", "third-party", "external service"],
-    "stub_implementation":       ["stub", "skeleton", "placeholder", "interface"],
+    "stub_implementation":       ["implement stub", "fill stub", "skeleton implementation", "unimplemented", "todo body"],
     "config_change":             ["config", "configuration", "settings", "env var"],
 }
 

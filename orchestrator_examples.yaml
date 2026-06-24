@@ -18,11 +18,11 @@ examples:
       - agent_role: code_editor_agent
         purpose: Modify existing working code to add validation
         complexity: medium
-        depends_on: ["0"]
+        depends_on: [0]
       - agent_role: test_generator_agent
         purpose: Add tests for validation behavior
         complexity: medium
-        depends_on: ["0", "1"]
+        depends_on: [0, 1]
     common_wrong_outputs:
       - Using implementation_agent for existing-code validation (use code_editor_agent instead)
       - Allowing scaffold and code edit to run in parallel when the edit depends on scaffolded files
@@ -37,11 +37,11 @@ examples:
         - title: Add validation logic to handler
           agent_role: code_editor_agent
           complexity: medium
-          depends_on: ["0"]
+          depends_on: [0]
         - title: Add validation tests
           agent_role: test_generator_agent
           complexity: medium
-          depends_on: ["0", "1"]
+          depends_on: [0, 1]
 
   - id: existing_code_validation_change
     pattern_name: Existing-code validation change
@@ -61,7 +61,7 @@ examples:
       - agent_role: test_generator_agent
         purpose: Add or update tests for the validation behavior
         complexity: medium
-        depends_on: ["0"]
+        depends_on: [0]
     common_wrong_outputs:
       - Using implementation_agent because the task says "implement" — if the code already exists, use code_editor_agent
       - Forgetting that tests depend on the code edit and creating them as a parallel task
@@ -76,7 +76,7 @@ examples:
         - title: Add tests for email validation edge cases
           agent_role: test_generator_agent
           complexity: medium
-          depends_on: ["0"]
+          depends_on: [0]
 
   - id: new_module_with_stubs
     pattern_name: New module with stubs
@@ -97,11 +97,11 @@ examples:
       - agent_role: implementation_agent
         purpose: Fill in logic inside the scaffolded stubs
         complexity: medium
-        depends_on: ["0"]
+        depends_on: [0]
       - agent_role: test_generator_agent
         purpose: Add tests for the new module behavior
         complexity: medium
-        depends_on: ["0", "1"]
+        depends_on: [0, 1]
     common_wrong_outputs:
       - Using code_editor_agent before files exist
       - Using implementation_agent directly without scaffolding first
@@ -116,11 +116,11 @@ examples:
         - title: Implement CacheManager logic
           agent_role: implementation_agent
           complexity: medium
-          depends_on: ["0"]
+          depends_on: [0]
         - title: Add tests for CacheManager
           agent_role: test_generator_agent
           complexity: medium
-          depends_on: ["0", "1"]
+          depends_on: [0, 1]
 
   - id: cli_command_addition
     pattern_name: CLI command addition
@@ -139,11 +139,11 @@ examples:
       - agent_role: test_generator_agent
         purpose: Add tests for the CLI command behavior
         complexity: medium
-        depends_on: ["0"]
+        depends_on: [0]
       - agent_role: documentation_writer_agent
         purpose: Update help text or usage documentation if needed
         complexity: low
-        depends_on: ["0"]
+        depends_on: [0]
     common_wrong_outputs:
       - Creating unnecessary scaffold tasks when the CLI structure already exists
       - Adding a generic code_reviewer_agent task (executor runs review internally)
@@ -158,11 +158,11 @@ examples:
         - title: Add tests for the reset command
           agent_role: test_generator_agent
           complexity: medium
-          depends_on: ["0"]
+          depends_on: [0]
         - title: Update CLI help documentation
           agent_role: documentation_writer_agent
           complexity: low
-          depends_on: ["0"]
+          depends_on: [0]
 
   - id: database_migration
     pattern_name: Database migration
@@ -182,11 +182,11 @@ examples:
       - agent_role: security_reviewer_agent
         purpose: Review migration for data loss risk, locking behavior, and compliance
         complexity: medium
-        depends_on: ["0"]
+        depends_on: [0]
       - agent_role: test_generator_agent
         purpose: Add tests verifying migration correctness and rollback safety
         complexity: medium
-        depends_on: ["0"]
+        depends_on: [0]
     common_wrong_outputs:
       - Routing migration work to code_editor_agent or implementation_agent
       - Omitting security review for irreversible or high-risk schema changes
@@ -201,8 +201,8 @@ examples:
         - title: Security review of migration for locking and rollback risk
           agent_role: security_reviewer_agent
           complexity: medium
-          depends_on: ["0"]
+          depends_on: [0]
         - title: Add tests verifying index creation and query performance
           agent_role: test_generator_agent
           complexity: medium
-          depends_on: ["0"]
+          depends_on: [0]
