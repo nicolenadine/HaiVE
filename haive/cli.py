@@ -159,9 +159,9 @@ def run(
         help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
     ),
     examples: str = typer.Option(
-        "orchestrator_examples.yaml",
+        "haive/orchestration/examples.yaml",
         "--examples",
-        help="Path to orchestrator_examples.yaml. Skipped gracefully if not found.",
+        help="Path to orchestrator examples YAML. Skipped gracefully if not found.",
     ),
 ) -> None:
     """Run the haive orchestrator for a milestone (dry run — prints plan, no writes)."""
