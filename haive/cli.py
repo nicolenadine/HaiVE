@@ -1,6 +1,8 @@
 import shutil
+from datetime import datetime, timezone
 
 import typer
+from pydantic import ValidationError
 
 from haive.config.manager import ConfigManager
 
@@ -114,6 +116,34 @@ def _preflight_checks() -> None:
     _check_active_config()
 
 
+# ── Output formatting ─────────────────────────────────────────────────────────
+
+def _print_dry_run_output(project, output) -> None:
+    bar = "─" * 62
+    title = project.title
+    typer.echo(f"\n{bar}")
+    typer.echo(f"  DRY RUN — {title}")
+    typer.echo(f"{bar}\n")
+
+    if output.done:
+        typer.echo("Orchestrator signals: project complete. No new tasks to create.")
+        return
+
+    typer.echo(f"Tasks to create ({len(output.new_tasks)}):\n")
+    for i, task in enumerate(output.new_tasks, 1):
+        deps = ", ".join(task.depends_on) if task.depends_on else "none"
+        typer.echo(f"  {i}. [{task.agent_role.value} / {task.complexity.value}] {task.title}")
+        typer.echo(f"     {task.description}")
+        typer.echo(f"     Depends on: {deps}")
+        if task.acceptance_criteria:
+            typer.echo("     Acceptance criteria:")
+            for ac in task.acceptance_criteria:
+                typer.echo(f"       - {ac}")
+        if task.recovery_for:
+            typer.echo(f"     Recovery for: #{task.recovery_for}")
+        typer.echo()
+
+
 # ── Run command ───────────────────────────────────────────────────────────────
 
 @app.command()
@@ -123,12 +153,81 @@ def run(
         "--project",
         help="GitHub milestone number to run. Overrides GITHUB_MILESTONE_ID in config.",
     ),
+    agents: str = typer.Option(
+        "agents.yaml",
+        "--agents",
+        help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
+    ),
+    examples: str = typer.Option(
+        "orchestrator_examples.yaml",
+        "--examples",
+        help="Path to orchestrator_examples.yaml. Skipped gracefully if not found.",
+    ),
 ) -> None:
-    """Run the haive agent harness for a milestone."""
+    """Run the haive orchestrator for a milestone (dry run — prints plan, no writes)."""
     _preflight_checks()
     milestone_id = _resolve_milestone_id(project)
-    typer.echo(f"haive run --project {milestone_id}: not implemented yet.")
-    raise typer.Exit(code=0)
+
+    from pathlib import Path
+
+    from haive.adapters.pm.github import GitHubPMAdapter
+    from haive.llm.errors import APIError
+    from haive.llm.model_client import ModelClient
+    from haive.llm.tier_config import TierConfig
+    from haive.models.config import load_settings
+    from haive.models.orchestrator import OrchestratorInput
+    from haive.orchestration.example_library import ExampleLibrary
+    from haive.orchestration.orchestrator import Orchestrator
+    from haive.orchestration.task_view_builder import TaskViewBuilder
+    from haive.persistence.state_store import StateStore
+    from haive.registry.agent_registry import AgentRegistry
+
+    try:
+        settings = load_settings()
+        pm = GitHubPMAdapter(settings)
+        state_store = StateStore(settings)
+        registry = AgentRegistry.load(agents)
+        tier_config = TierConfig.from_settings(settings)
+        model_client = ModelClient(settings)
+
+        example_library: ExampleLibrary | None = None
+        examples_path = Path(examples)
+        if examples_path.exists():
+            example_library = ExampleLibrary.load(str(examples_path))
+        else:
+            typer.echo(f"Note: {examples} not found — running without planning examples.")
+
+        typer.echo(f"Fetching milestone {milestone_id}...")
+        project_data = pm.get_project(milestone_id)
+        tasks = pm.get_tasks(milestone_id)
+        typer.echo(f"Found {len(tasks)} existing task(s).")
+
+        state = state_store.load_or_init(milestone_id)
+        since = state.last_run_at or state.created_at
+        new_comments = pm.read_new_comments(milestone_id, since)
+
+        task_views = TaskViewBuilder().build(
+            tasks, state, budget_tokens=tier_config.orchestrator.context_budget
+        )
+        orch_input = OrchestratorInput(
+            project=project_data,
+            tasks=task_views,
+            new_comments=new_comments,
+            agent_summary=registry.get_orchestrator_summary(),
+        )
+
+        typer.echo("Calling orchestrator...")
+        orchestrator = Orchestrator(model_client, tier_config, settings.max_recovery_depth, example_library)
+        output = orchestrator.run_loop(orch_input)
+
+        _print_dry_run_output(project_data, output)
+
+    except (RuntimeError, APIError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+    except ValidationError as e:
+        typer.echo(f"Validation error: {e}", err=True)
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

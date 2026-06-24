@@ -8,6 +8,9 @@ from haive.llm.errors import APIError
 from haive.llm.model_client import ModelClient
 from haive.llm.tier_config import TierConfig
 from haive.models.orchestrator import OrchestratorInput, OrchestratorOutput
+from haive.orchestration.example_library import ExampleLibrary, format_examples_for_prompt
+from haive.orchestration.example_selector import ExampleSelector
+from haive.orchestration.prompts import build_orchestrator_system_prompt
 
 _ORCHESTRATOR_MAX_OUTPUT_TOKENS = 4096
 
@@ -22,82 +25,30 @@ def _extract_json(content: str) -> str:
     raise APIError("Could not extract JSON from orchestrator response.")
 
 
-def _build_system_prompt(max_recovery_depth: int) -> str:
-    return f"""You are the orchestrator for an AI-driven software development workflow.
-On each run you receive a snapshot of the project and produce the next batch of tasks to create,
-or signal that the project is complete.
-
-## Input
-
-You receive a JSON object with these fields:
-- project: project metadata (id, title, description, branch)
-- tasks: list of existing tasks, each with id, title, description, agent_role, complexity,
-  depends_on, lineage_depth, recovery_for, status, verdict, and attempt_log
-- new_comments: list of new human comments since the last run (task_id, author, body, created_at)
-- agent_summary: one-line description per available agent role
-
-## Output
-
-Respond with pure JSON only. No markdown, no explanation. Schema:
-
-{{
-  "new_tasks": [
-    {{
-      "title": "...",
-      "description": "...",
-      "agent_role": "<role>",
-      "complexity": "low" | "medium" | "high",
-      "depends_on": [...],
-      "acceptance_criteria": ["..."],
-      "recovery_for": null | "<task_id>",
-      "lineage_depth": 0
-    }}
-  ],
-  "done": false
-}}
-
-## depends_on formats
-
-Each entry in depends_on is a string in one of two formats:
-- "42" — the GitHub issue number of an existing task
-- "new:0", "new:1" — zero-based index into the current new_tasks list (resolved to real issue numbers during task creation)
-
-Use intra-wave refs ("new:N") when a task in this wave depends on another task in the same wave.
-
-## Recovery rules
-
-If a task has status "needs_human_review" AND its task_id appears in new_comments AND
-lineage_depth < {max_recovery_depth}:
-- Create a recovery NewTask with recovery_for set to the failed task's task_id
-- Set lineage_depth = failed_task.lineage_depth + 1
-
-Never create a recovery task if lineage_depth >= {max_recovery_depth}.
-
-## Done condition
-
-Set done=true only when every task has status "complete" and no pending, blocked, or
-in_progress tasks remain. new_tasks must be empty when done=true.
-
-## Prohibitions
-
-Do not include model names, file paths, or implementation code in task titles or descriptions.
-Tasks describe WHAT to do, not HOW. Keep descriptions concise and implementation-agnostic."""
-
-
 class Orchestrator:
     def __init__(
         self,
         model_client: ModelClient,
         tier_config: TierConfig,
         max_recovery_depth: int,
+        example_library: ExampleLibrary | None = None,
     ) -> None:
         self._model_client = model_client
         self._tier_config = tier_config
         self._max_recovery_depth = max_recovery_depth
+        self._example_library = example_library
 
     def run_loop(self, input: OrchestratorInput) -> OrchestratorOutput:
         prompt = input.model_dump_json(indent=2)
-        system = _build_system_prompt(self._max_recovery_depth)
+
+        planning_examples: str | None = None
+        if self._example_library is not None:
+            milestone_text = f"{input.project.title} {input.project.description}"
+            selected = ExampleSelector().select(self._example_library.all(), milestone_text)
+            if selected:
+                planning_examples = format_examples_for_prompt(selected)
+
+        system = build_orchestrator_system_prompt(self._max_recovery_depth, planning_examples)
 
         response = self._model_client.call(
             self._tier_config.orchestrator,
