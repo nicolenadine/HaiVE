@@ -15,7 +15,7 @@ _TAG_KEYWORDS: dict[str, list[str]] = {
     "new_module":                ["new module", "new package", "new class", "introduce"],
     "refactor_only":             ["refactor", "rename", "restructure", "clean up", "simplify"],
     "external_api_integration":  ["api integration", "webhook", "third-party", "external service"],
-    "stub_implementation":       ["implement stub", "fill stub", "skeleton implementation", "unimplemented", "todo body"],
+    "stub_implementation":       ["implement stub", "fill stub", "fill in stub", "stubbed logic", "skeleton implementation", "implement skeleton", "unimplemented", "todo body", "todo bodies", "empty method body", "empty function body", "placeholder method", "placeholder function"],
     "config_change":             ["config", "configuration", "settings", "env var"],
 }
 

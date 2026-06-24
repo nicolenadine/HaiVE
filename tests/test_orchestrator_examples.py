@@ -229,6 +229,17 @@ class TestMilestoneClassifier:
         tags = classify_milestone("MODIFY EXISTING CODE")
         assert "existing_code_edit" in tags
 
+    def test_fill_in_todo_bodies_gets_stub_implementation_tag(self):
+        text = (
+            "Fill in the TODO bodies in the existing ExampleSelector class. "
+            "The public method signatures already exist. Add tests for exact tag matches, "
+            "partial tag matches, and deterministic tie-breaking."
+        )
+        tags = classify_milestone(text)
+        assert "stub_implementation" in tags
+        assert "tests_required" in tags
+        assert "new_module" not in tags
+
 
 # ---------------------------------------------------------------------------
 # TestExampleSelector
