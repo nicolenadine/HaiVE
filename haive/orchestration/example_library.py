@@ -115,7 +115,12 @@ def format_examples_for_prompt(examples: list[OrchestratorExample]) -> str:
     if not examples:
         return ""
 
-    sections: list[str] = ["## Relevant planning examples"]
+    sections: list[str] = [
+        "## Relevant planning examples\n"
+        "The examples below show how similar milestones have been decomposed. "
+        "Use them as reference patterns — adapt the agent roles, task order, and dependencies "
+        "to fit the current milestone. Do not copy tasks verbatim."
+    ]
 
     for ex in examples:
         lines: list[str] = [f"\n### {ex.pattern_name}"]
