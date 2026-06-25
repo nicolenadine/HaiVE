@@ -15,6 +15,7 @@ dependencies = [
     "pytest",
     "duckdb",
     "tree-sitter",
+    "tree-sitter-python",
     "opentelemetry-sdk",
     "openinference-instrumentation-litellm",
     "arize-phoenix",
