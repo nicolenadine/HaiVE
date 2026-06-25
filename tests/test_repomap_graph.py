@@ -196,3 +196,41 @@ class TestRankFiles:
         assert r.path
         assert r.score > 0
         assert r.reason
+
+    def test_path_match_returns_file_when_no_symbol_match(self, tmp_path):
+        # query matches the file path but not any symbol name
+        svc, _ = _setup(tmp_path, {
+            "auth_middleware.py": "def noop(): pass\n",
+            "unrelated.py": "def other(): pass\n",
+        })
+        GraphBuilder().build_edges(svc._db)
+        results = Ranker().rank_files(svc._db, "auth", top_k=2)
+        paths = [r.path for r in results]
+        assert any("auth_middleware" in p for p in paths)
+        auth_result = next(r for r in results if "auth_middleware" in r.path)
+        assert "path contains" in auth_result.reason
+
+    def test_ambiguous_symbol_name_produces_no_edge(self, tmp_path):
+        # both files define a symbol with the same name — no edge should be created
+        svc, _ = _setup(tmp_path, {
+            "a.py": "def common(): pass\n",
+            "b.py": "from a import common\n\ndef common(): pass\n",
+        })
+        GraphBuilder().build_edges(svc._db)
+        count = svc._db.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        assert count == 0
+
+    def test_ambiguous_symbol_resolved_symbol_id_stays_null(self, tmp_path):
+        svc, _ = _setup(tmp_path, {
+            "a.py": "def common(): pass\n",
+            "b.py": "from a import common\n\ndef common(): pass\n",
+        })
+        GraphBuilder().build_edges(svc._db)
+        # the reference to "common" in b.py should remain unresolved
+        row = svc._db.conn.execute("""
+            SELECT resolved_symbol_id FROM "references"
+            WHERE symbol_name = 'common'
+            LIMIT 1
+        """).fetchone()
+        assert row is not None
+        assert row[0] is None

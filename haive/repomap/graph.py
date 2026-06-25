@@ -7,6 +7,7 @@ from haive.repomap.db import RepoMapDB
 
 _DAMPING = 0.85
 _ITERATIONS = 20
+_PAGERANK_WEIGHT = 0.2   # keeps direct symbol/path matches dominant
 
 
 @dataclass
@@ -21,27 +22,41 @@ class GraphBuilder:
         conn = db.conn
         conn.execute("DELETE FROM edges")
 
+        # Only create edges for unambiguous matches: symbol name maps to exactly
+        # one symbol row globally. Common names like run/save/__init__ that appear
+        # in multiple files are skipped to avoid noisy cross-file edges.
         rows = conn.execute("""
-            SELECT r.file_id, s.file_id, s.name, s.id
+            WITH unambiguous AS (
+                SELECT name, MIN(id) AS symbol_id, MIN(file_id) AS to_file_id
+                FROM symbols
+                GROUP BY name
+                HAVING COUNT(*) = 1
+            )
+            SELECT DISTINCT r.file_id AS from_file_id, u.to_file_id, u.name
             FROM "references" r
-            JOIN symbols s ON r.symbol_name = s.name
-            WHERE r.file_id != s.file_id
-            GROUP BY r.file_id, s.file_id, s.name, s.id
+            JOIN unambiguous u ON r.symbol_name = u.name
+            WHERE r.file_id != u.to_file_id
         """).fetchall()
 
-        for from_file_id, to_file_id, symbol_name, symbol_id in rows:
+        for from_file_id, to_file_id, symbol_name in rows:
             edge_id = conn.execute("SELECT nextval('edges_id_seq')").fetchone()[0]
             conn.execute(
                 "INSERT INTO edges VALUES (?, ?, ?, ?, ?)",
                 [edge_id, from_file_id, to_file_id, symbol_name, 1.0],
             )
 
-        # resolve references to their symbol ids
+        # Set resolved_symbol_id only when the name is unambiguous (one symbol globally).
         conn.execute("""
+            WITH unique_matches AS (
+                SELECT name, MIN(id) AS symbol_id, COUNT(*) AS match_count
+                FROM symbols
+                GROUP BY name
+            )
             UPDATE "references"
-            SET resolved_symbol_id = s.id
-            FROM symbols s
-            WHERE "references".symbol_name = s.name
+            SET resolved_symbol_id = unique_matches.symbol_id
+            FROM unique_matches
+            WHERE "references".symbol_name = unique_matches.name
+              AND unique_matches.match_count = 1
         """)
 
 
@@ -52,7 +67,7 @@ class Ranker:
         conn = db.conn
         q = query.lower()
 
-        # --- keyword score: files that define a symbol matching the query ---
+        # --- symbol keyword score (1.0) ---
         kw_matches = conn.execute("""
             SELECT f.id, f.path, s.name
             FROM files f
@@ -63,18 +78,24 @@ class Ranker:
 
         keyword_score: dict[int, float] = {}
         defining_symbol: dict[int, str] = {}
-        for file_id, path, sym_name in kw_matches:
+        for file_id, _path, sym_name in kw_matches:
             if file_id not in keyword_score:
                 keyword_score[file_id] = 1.0
                 defining_symbol[file_id] = sym_name
 
-        # --- pagerank over edges ---
+        # --- path keyword score (0.5): catches module/file-name queries ---
+        path_score: dict[int, float] = {
+            r[0]: 0.5
+            for r in conn.execute(
+                "SELECT id FROM files WHERE lower(path) LIKE ?", [f"%{q}%"]
+            ).fetchall()
+        }
+
+        # --- pagerank over edges (weighted at _PAGERANK_WEIGHT) ---
         all_files = {r[0]: r[1] for r in conn.execute("SELECT id, path FROM files").fetchall()}
         edges = conn.execute("SELECT from_file_id, to_file_id FROM edges").fetchall()
-
         pr = _pagerank(set(all_files), edges)
 
-        # --- combine scores ---
         in_degree: dict[int, int] = defaultdict(int)
         for _, to_id in edges:
             in_degree[to_id] += 1
@@ -82,8 +103,8 @@ class Ranker:
         candidates: list[tuple[float, int]] = []
         for file_id in all_files:
             ks = keyword_score.get(file_id, 0.0)
-            ps = pr.get(file_id, 0.0)
-            combined = ks + ps
+            ps = path_score.get(file_id, 0.0)
+            combined = ks + ps + _PAGERANK_WEIGHT * pr.get(file_id, 0.0)
             if combined > 0:
                 candidates.append((combined, file_id))
 
@@ -94,6 +115,8 @@ class Ranker:
             path = all_files[file_id]
             if file_id in defining_symbol:
                 reason = f"defines '{defining_symbol[file_id]}'"
+            elif file_id in path_score:
+                reason = f"path contains '{query}'"
             else:
                 count = in_degree.get(file_id, 0)
                 reason = f"referenced by {count} other file{'s' if count != 1 else ''}"
@@ -110,7 +133,6 @@ def _pagerank(
         return {}
 
     n = len(file_ids)
-    # out-degree per node
     out_degree: dict[int, int] = defaultdict(int)
     predecessors: dict[int, list[int]] = defaultdict(list)
     for from_id, to_id in edges:
@@ -120,7 +142,6 @@ def _pagerank(
     rank = {fid: 1.0 / n for fid in file_ids}
 
     for _ in range(_ITERATIONS):
-        # dangling mass: nodes with no outgoing edges contribute to all nodes
         dangling = sum(rank[fid] for fid in file_ids if out_degree[fid] == 0)
         new_rank: dict[int, float] = {}
         for fid in file_ids:
