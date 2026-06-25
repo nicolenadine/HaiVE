@@ -37,7 +37,7 @@ class TierConfig:
                 context_budget=settings.tier_high_context_budget,
             ),
             orchestrator=Tier(
-                models=[settings.orchestrator_model],
+                models=settings.tier_high_models,
                 max_attempts=1,
                 context_budget=_ORCHESTRATOR_CONTEXT_BUDGET,
             ),
