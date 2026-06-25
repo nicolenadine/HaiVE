@@ -50,7 +50,7 @@ def _make_fixture(tmp_path: Path) -> Path:
 def _service(tmp_path: Path) -> tuple[RepoMapService, Path]:
     repo = _make_fixture(tmp_path)
     db = RepoMapDB.initialize(":memory:")
-    return RepoMapService(db), repo
+    return RepoMapService(db, str(repo)), repo
 
 
 class TestScanRepoPopulates:
@@ -125,7 +125,7 @@ class TestScanRepoNonPyFiles:
         (repo / "README.md").write_text("# Readme\n")
         (repo / "config.yaml").write_text("key: value\n")
         db = RepoMapDB.initialize(":memory:")
-        svc = RepoMapService(db)
+        svc = RepoMapService(db, str(repo))
         svc.scan_repo(str(repo))
         paths = {r[0] for r in db.conn.execute("SELECT path FROM files").fetchall()}
         assert all(p.endswith(".py") for p in paths)
@@ -136,7 +136,7 @@ class TestScanRepoNonPyFiles:
         repo.mkdir()
         (repo / "README.md").write_text("# hi\n")
         db = RepoMapDB.initialize(":memory:")
-        svc = RepoMapService(db)
+        svc = RepoMapService(db, str(repo))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             svc.scan_repo(str(repo))
@@ -150,7 +150,7 @@ class TestScanRepoNonPyFiles:
         pycache.mkdir()
         (pycache / "main.cpython-311.pyc").write_bytes(b"\x00" * 16)
         db = RepoMapDB.initialize(":memory:")
-        svc = RepoMapService(db)
+        svc = RepoMapService(db, str(repo))
         svc.scan_repo(str(repo))
         paths = {r[0] for r in db.conn.execute("SELECT path FROM files").fetchall()}
         assert not any("__pycache__" in p for p in paths)
