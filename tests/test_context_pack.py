@@ -71,17 +71,17 @@ class TestContextPackBasics:
     def test_token_estimate_is_non_negative(self, tmp_path):
         svc, _ = _setup(tmp_path)
         pack = svc.get_context_pack(_make_task(), token_budget=10_000)
-        assert pack.token_estimate >= 0
+        assert pack.symbol_source_token_estimate >= 0
 
     def test_token_estimate_within_budget(self, tmp_path):
         svc, _ = _setup(tmp_path)
         pack = svc.get_context_pack(_make_task(), token_budget=500)
-        assert pack.token_estimate <= 500
+        assert pack.symbol_source_token_estimate <= 500
 
     def test_very_tight_budget_trims_all_symbols(self, tmp_path):
         svc, _ = _setup(tmp_path)
         pack = svc.get_context_pack(_make_task(), token_budget=1)
-        assert pack.token_estimate <= 1
+        assert pack.symbol_source_token_estimate <= 1
 
     def test_relevant_files_non_empty_for_matching_query(self, tmp_path):
         svc, _ = _setup(tmp_path)

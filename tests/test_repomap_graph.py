@@ -68,7 +68,7 @@ def _setup(tmp_path: Path, files: dict[str, str]) -> tuple[RepoMapService, Path]
     for name, content in files.items():
         (repo / name).write_text(content)
     db = RepoMapDB.initialize(":memory:")
-    svc = RepoMapService(db)
+    svc = RepoMapService(db, str(repo))
     svc.scan_repo(str(repo))
     return svc, repo
 

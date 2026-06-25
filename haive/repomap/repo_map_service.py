@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ _PRUNE_DIRS = {"__pycache__", ".git"}
 
 
 class RepoMapService:
-    def __init__(self, db: RepoMapDB, root: str = "") -> None:
+    def __init__(self, db: RepoMapDB, root: str) -> None:
         self._db = db
         self._root = root
 
@@ -108,21 +109,23 @@ class RepoMapService:
 
     def get_context_pack(self, task: Task, token_budget: int) -> ContextPack:
         conn = self._db.conn
-        query = f"{task.title} {task.description}"
+        query = " ".join([task.title, task.description, *task.acceptance_criteria])
         ranked = Ranker().rank_files(self._db, query, top_k=10)
 
-        ranked_ids = []
+        ranked_pairs: list[tuple[int, object]] = []
         for rf in ranked:
             row = conn.execute("SELECT id FROM files WHERE path = ?", [rf.path]).fetchone()
             if row:
-                ranked_ids.append(row[0])
+                ranked_pairs.append((row[0], rf))
+
+        ranked_ids = [file_id for file_id, _ in ranked_pairs]
 
         # relevant_files preserves ranked order
         relevant_files = [RelevantFile(path=rf.path, reason=rf.reason) for rf in ranked]
 
         # symbols in ranked order, by start_line within each file
         relevant_symbols: list[RelevantSymbol] = []
-        for file_id, rf in zip(ranked_ids, ranked):
+        for file_id, rf in ranked_pairs:
             abs_path = Path(self._root) / rf.path
             try:
                 lines = abs_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -173,17 +176,21 @@ class RepoMapService:
             impacted_files = [r[0] for r in rows]
 
         # trim from the bottom until within token_budget
-        token_estimate = sum(len(s.source) for s in relevant_symbols) // 4
-        while token_estimate > token_budget and relevant_symbols:
+        symbol_source_token_estimate = math.ceil(
+            sum(len(s.source) for s in relevant_symbols) / 4
+        )
+        while symbol_source_token_estimate > token_budget and relevant_symbols:
             relevant_symbols.pop()
-            token_estimate = sum(len(s.source) for s in relevant_symbols) // 4
+            symbol_source_token_estimate = math.ceil(
+                sum(len(s.source) for s in relevant_symbols) / 4
+            )
 
         return ContextPack(
             relevant_files=relevant_files,
             relevant_symbols=relevant_symbols,
             impacted_files=impacted_files,
             broken_references=broken_references,
-            token_estimate=token_estimate,
+            symbol_source_token_estimate=symbol_source_token_estimate,
         )
 
 

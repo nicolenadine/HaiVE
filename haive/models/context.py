@@ -28,4 +28,4 @@ class ContextPack(BaseModel):
     relevant_symbols: list[RelevantSymbol]
     impacted_files: list[str]
     broken_references: list[BrokenReference]
-    token_estimate: int
+    symbol_source_token_estimate: int
