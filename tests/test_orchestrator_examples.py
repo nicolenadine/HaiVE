@@ -265,8 +265,14 @@ class TestClassifyTagsExclusions:
         _, excluded = classify_tags("Existing code only — no scaffold required.")
         assert "new_files_required" in excluded
 
-    def test_modify_existing_excludes_new_files_required(self):
+    def test_modify_existing_alone_does_not_exclude_new_files_required(self):
+        # "modify existing" is no longer a bare exclusion phrase — a milestone can
+        # legitimately need both new files and edits to existing code.
         _, excluded = classify_tags("Modify existing handler to add stricter validation.")
+        assert "new_files_required" not in excluded
+
+    def test_modify_existing_only_excludes_new_files_required(self):
+        _, excluded = classify_tags("Modify existing only — no new files required.")
         assert "new_files_required" in excluded
 
     def test_existing_working_code_excludes_stub_implementation(self):
@@ -574,8 +580,9 @@ _NEW_MODULE_YAML = textwrap.dedent("""\
 
 _MILESTONE_5_TEXT = (
     "Introduce a new ExampleSelector module. "
-    "First create the module skeleton with public method signatures for selecting examples by tag overlap. "
-    "Then implement the stubbed selector logic. "
+    "The module file does not exist yet. "
+    "Implement module skeleton with stub method signatures for selecting examples by tag overlap. "
+    "Fill in stub implementation for the selection algorithm. "
     "Add tests for exact tag matches, partial tag matches, and deterministic tie-breaking."
 )
 
