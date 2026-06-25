@@ -10,7 +10,7 @@ from pathlib import Path
 from haive.models.context import BrokenReference, ContextPack, RelevantFile, RelevantSymbol
 from haive.models.task import Task
 from haive.repomap.db import RepoMapDB
-from haive.repomap.graph import Ranker
+from haive.repomap.graph import GraphBuilder, Ranker
 from haive.repomap.language_parser import LanguageParser, ParsedFile, PythonParser
 
 _PRUNE_DIRS = {"__pycache__", ".git"}
@@ -68,6 +68,13 @@ class RepoMapService:
             self._db.conn.execute(
                 'DELETE FROM "references" WHERE file_id = ?', [file_id]
             )
+            # NULL out resolved_symbol_id in other files' references before deleting symbols
+            # to avoid FK violation (references.resolved_symbol_id → symbols.id)
+            self._db.conn.execute(
+                'UPDATE "references" SET resolved_symbol_id = NULL '
+                "WHERE resolved_symbol_id IN (SELECT id FROM symbols WHERE file_id = ?)",
+                [file_id],
+            )
             self._db.conn.execute(
                 "DELETE FROM symbols WHERE file_id = ?", [file_id]
             )
@@ -106,6 +113,24 @@ class RepoMapService:
                 'INSERT INTO "references" VALUES (?, ?, ?, ?, ?)',
                 [ref_id, file_id, ref.symbol_name, ref.line_number, None],
             )
+
+    def update_files(self, paths: list[str]) -> None:
+        parsers: list[LanguageParser] = [PythonParser()]
+        ext_map: dict[str, LanguageParser] = {
+            ext: parser for parser in parsers for ext in parser.extensions
+        }
+        for path in paths:
+            ext = os.path.splitext(path)[1]
+            parser = ext_map.get(ext)
+            if parser is None:
+                continue
+            abs_path = Path(self._root) / path
+            if not abs_path.exists():
+                continue
+            content = abs_path.read_text(encoding="utf-8", errors="replace")
+            parsed = parser.parse_file(path, content)
+            self._upsert_file(path, parser.language, parsed)
+        GraphBuilder().build_edges(self._db)
 
     def get_context_pack(self, task: Task, token_budget: int) -> ContextPack:
         conn = self._db.conn
