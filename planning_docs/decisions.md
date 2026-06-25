@@ -178,6 +178,18 @@ Format per entry:
 
 ---
 
+### RepoMap scanner depends on a complete .gitignore
+
+**Decision:** `scan_repo()` respects `.gitignore` using fnmatch-style pattern matching and applies it at the directory level during the walk — directories matching any gitignore pattern are skipped entirely, not just filtered at the file level. The only hardcoded exception is `.git`, which cannot appear in `.gitignore` by design. All other exclusions (`.venv`, `node_modules`, `__pycache__`, `dist`, etc.) are expected to be in the project's `.gitignore`.
+
+**Alternatives:** Hardcode a known-bad directory list in the scanner; ship a default exclusion list alongside the scanner.
+
+**Rationale:** Hardcoding exclusions in the scanner is a maintenance problem — the list of directories to skip is project- and ecosystem-specific (Python projects have `.venv`, Node projects have `node_modules`, etc.). The project's `.gitignore` is already the authoritative source of "what should not be tracked" and is maintained by the project author. Respecting it is correct and avoids duplicating that knowledge.
+
+**Tradeoff:** If the project's `.gitignore` is incomplete or missing, `scan_repo()` will index everything it can walk — including installed packages in `.venv`, compiled artifacts in `dist/`, etc. This has severe consequences for the ranker: packages with many cross-file references dominate PageRank and drown out project files entirely. Validated during hands-on testing: scanning without `.venv` in `.gitignore` indexed 15,477 files and returned nacl exception classes as the top-ranked context for a CLI task. With a complete `.gitignore`, the same run indexed 65 files and produced relevant results. The user is responsible for maintaining a complete `.gitignore`. Haive surfaces this in its README.
+
+---
+
 ### No orchestrator file tree
 
 **Decision:** The orchestrator does not receive a file tree or any file contents.

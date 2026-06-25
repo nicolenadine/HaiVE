@@ -13,7 +13,7 @@ from haive.repomap.db import RepoMapDB
 from haive.repomap.graph import GraphBuilder, Ranker
 from haive.repomap.language_parser import LanguageParser, ParsedFile, PythonParser
 
-_PRUNE_DIRS = {"__pycache__", ".git"}
+_ALWAYS_SKIP_DIRS = {".git"}  # dirs that can never appear in .gitignore
 
 
 class RepoMapService:
@@ -41,7 +41,11 @@ class RepoMapService:
             )
 
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in _ALWAYS_SKIP_DIRS
+                and not _is_ignored(os.path.relpath(os.path.join(dirpath, d), root), gitignore)
+            ]
             for filename in filenames:
                 ext = os.path.splitext(filename)[1]
                 parser = ext_map.get(ext)
@@ -246,7 +250,11 @@ def _any_matching_files(
     root: str, ext_map: dict[str, LanguageParser], gitignore: list[str]
 ) -> bool:
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _ALWAYS_SKIP_DIRS
+            and not _is_ignored(os.path.relpath(os.path.join(dirpath, d), root), gitignore)
+        ]
         for f in filenames:
             if os.path.splitext(f)[1] in ext_map:
                 rel = os.path.relpath(os.path.join(dirpath, f), root)
