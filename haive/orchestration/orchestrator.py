@@ -10,7 +10,7 @@ from haive.llm.tier_config import TierConfig
 from haive.models.orchestrator import OrchestratorInput, OrchestratorOutput
 from haive.orchestration.example_library import ExampleLibrary, format_examples_for_prompt
 from haive.orchestration.example_selector import ExampleSelector
-from haive.orchestration.prompts import build_orchestrator_system_prompt
+from haive.orchestration.prompts import build_orchestrator_prompt
 
 _ORCHESTRATOR_MAX_OUTPUT_TOKENS = 4096
 
@@ -48,7 +48,7 @@ class Orchestrator:
             if selected:
                 planning_examples = format_examples_for_prompt(selected)
 
-        system = build_orchestrator_system_prompt(self._max_recovery_depth, planning_examples)
+        system = build_orchestrator_prompt(self._max_recovery_depth, planning_examples)
 
         response = self._model_client.call(
             self._tier_config.orchestrator,

@@ -6,7 +6,7 @@ from haive.models.task import Task
 
 
 class ContextAssembler:
-    def assemble_prompt(
+    def build_agent_prompt(
         self,
         task: Task,
         context_pack: ContextPack,

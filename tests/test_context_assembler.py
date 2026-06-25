@@ -80,7 +80,7 @@ def _assemble(**kwargs) -> str:
         retry_feedback=None,
     )
     defaults.update(kwargs)
-    return ContextAssembler().assemble_prompt(**defaults)
+    return ContextAssembler().build_agent_prompt(**defaults)
 
 
 class TestSectionPresence:

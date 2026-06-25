@@ -10,7 +10,7 @@ from haive.orchestration.example_library import (
     format_examples_for_prompt,
 )
 from haive.orchestration.example_selector import ExampleSelector, classify_tags, score_example
-from haive.orchestration.prompts import build_orchestrator_system_prompt
+from haive.orchestration.prompts import build_orchestrator_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -455,15 +455,15 @@ class TestPromptFormatter:
 
 class TestOrchestratorPromptIntegration:
     def test_examples_included_when_provided(self):
-        prompt = build_orchestrator_system_prompt(3, "some example text")
+        prompt = build_orchestrator_prompt(3, "some example text")
         assert "some example text" in prompt
 
     def test_no_examples_section_when_none(self):
-        prompt = build_orchestrator_system_prompt(3, None)
+        prompt = build_orchestrator_prompt(3, None)
         assert "Relevant planning examples" not in prompt
 
     def test_prompt_still_valid_without_examples(self):
-        prompt = build_orchestrator_system_prompt(3)
+        prompt = build_orchestrator_prompt(3)
         assert "Recovery rules" in prompt
         assert "Done condition" in prompt
 
