@@ -4,6 +4,13 @@ import duckdb
 
 SCHEMA_VERSION = "1"
 
+_SEQUENCES: list[str] = [
+    "CREATE SEQUENCE IF NOT EXISTS files_id_seq START 1",
+    "CREATE SEQUENCE IF NOT EXISTS symbols_id_seq START 1",
+    "CREATE SEQUENCE IF NOT EXISTS references_id_seq START 1",
+    "CREATE SEQUENCE IF NOT EXISTS edges_id_seq START 1",
+]
+
 _TABLES: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS schema_meta (
@@ -72,7 +79,8 @@ class RepoMapDB:
         return db
 
     def _apply_schema(self) -> None:
-        for ddl in _TABLES:
+        # DDL runs before the version check; safe for v1 (all IF NOT EXISTS). Check version first when migrations add destructive DDL.
+        for ddl in _SEQUENCES + _TABLES:
             self._conn.execute(ddl)
         stored = self._conn.execute(
             "SELECT value FROM schema_meta WHERE key = 'schema_version'"
