@@ -117,6 +117,27 @@ class TestPythonParserContentHash:
         assert h1 != h2
 
 
+class TestPythonParserV1Scope:
+    """Document extraction boundaries for v1. Nested and class-in-class cases are deferred."""
+
+    def test_async_functions_are_captured(self):
+        # tree-sitter-python emits function_definition for both sync and async
+        result = PythonParser().parse_file("t.py", "async def handler(): pass\n")
+        assert any(s.name == "handler" for s in result.symbols)
+
+    def test_nested_functions_are_not_extracted(self):
+        result = PythonParser().parse_file("t.py", "def outer():\n    def inner(): pass\n")
+        names = {s.name for s in result.symbols}
+        assert "inner" not in names
+
+    def test_nested_classes_are_not_extracted(self):
+        src = "class Outer:\n    class Inner:\n        def method(self): pass\n"
+        result = PythonParser().parse_file("t.py", src)
+        names = {s.name for s in result.symbols}
+        assert "Inner" not in names
+        assert "method" not in names
+
+
 class TestLanguageParserProtocol:
     def test_python_parser_satisfies_protocol_without_inheriting(self):
         assert not issubclass(PythonParser, object.__class__)

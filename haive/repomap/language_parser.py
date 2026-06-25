@@ -170,6 +170,7 @@ def _refs_from_import_from(node: Node, refs: list[ParsedReference]) -> None:
 
 
 def _refs_from_call(node: Node, refs: list[ParsedReference]) -> None:
+    # Attribute calls stored by final identifier only (e.g. client.save() → "save"). Step 13 resolver must handle ambiguity.
     func = node.children[0] if node.children else None
     if func is None:
         return

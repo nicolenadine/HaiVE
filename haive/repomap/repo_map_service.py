@@ -29,7 +29,7 @@ class RepoMapService:
         }
         gitignore = _load_gitignore(root)
 
-        if not _any_matching_files(root, ext_map):
+        if not _any_matching_files(root, ext_map, gitignore):
             warnings.warn(
                 f"No files matching registered parsers ({list(ext_map)}) found in {root!r}",
                 stacklevel=2,
@@ -108,6 +108,7 @@ def _now() -> datetime:
 
 
 def _load_gitignore(root: str) -> list[str]:
+    # Simple fnmatch patterns only — no negation, anchored paths, or nested .gitignore. Use pathspec for real Git semantics.
     path = os.path.join(root, ".gitignore")
     if not os.path.exists(path):
         return []
@@ -125,9 +126,14 @@ def _is_ignored(rel_path: str, patterns: list[str]) -> bool:
     return any(fnmatch(rel_path, p) or fnmatch(name, p) for p in patterns)
 
 
-def _any_matching_files(root: str, ext_map: dict[str, LanguageParser]) -> bool:
+def _any_matching_files(
+    root: str, ext_map: dict[str, LanguageParser], gitignore: list[str]
+) -> bool:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
-        if any(os.path.splitext(f)[1] in ext_map for f in filenames):
-            return True
+        for f in filenames:
+            if os.path.splitext(f)[1] in ext_map:
+                rel = os.path.relpath(os.path.join(dirpath, f), root)
+                if not _is_ignored(rel, gitignore):
+                    return True
     return False

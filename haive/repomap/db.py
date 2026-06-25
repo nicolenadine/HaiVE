@@ -79,6 +79,7 @@ class RepoMapDB:
         return db
 
     def _apply_schema(self) -> None:
+        # DDL runs before the version check; safe for v1 (all IF NOT EXISTS). Check version first when migrations add destructive DDL.
         for ddl in _SEQUENCES + _TABLES:
             self._conn.execute(ddl)
         stored = self._conn.execute(
