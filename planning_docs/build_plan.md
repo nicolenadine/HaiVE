@@ -322,10 +322,15 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 **Scope**
 - `haive/models/orchestrator.py` — `OrchestratorInput`, `OrchestratorTaskView`, `OrchestratorOutput`, `NewTask`
+  - `NewTask.depends_on: list[str]` supports two formats:
+    - Existing task IDs: `"42"` (GitHub issue number of an already-created task)
+    - Intra-wave positional refs: `"new:0"`, `"new:1"` — zero-based index into the current `new_tasks` list
+  - This allows the orchestrator to express a full dependency graph in one wave; the CLI resolves refs during creation (see Step 23)
 - `haive/orchestration/orchestrator.py` — `Orchestrator` class
   - `run_loop(input: OrchestratorInput) -> OrchestratorOutput`
   - Calls `ModelClient` with `ORCHESTRATOR_MODEL`
   - Validates response against `OrchestratorOutput` schema
+  - The orchestrator prompt must document the `"new:N"` intra-wave ref convention so the LLM knows how to express within-wave dependencies
   - Recovery logic: if a task is `needs-human-review` with human comments and `lineage_depth < MAX_RECOVERY_DEPTH`, produce a recovery `NewTask` with `recovery_for` set and `lineage_depth` incremented
   - No `EscalationSignal` — escalation happens automatically in the executor; orchestrator only sees the resulting `needs-human-review` status and decides whether to attempt recovery
   - `done: bool` output: when True, `new_tasks` must be empty
@@ -737,7 +742,7 @@ Each step in this plan represents one milestone of work: focused, independently 
   12. Build `OrchestratorInput` from project + tasks + new_comments + local_state verdicts (`TaskViewBuilder`)
   13. Call `Orchestrator.run_loop` → `OrchestratorOutput`
   14. If `done=True`: `VCSAdapter.create_project_pr(project_branch → main)`; print summary; exit
-  15. Create new tasks via `PMAdapter.create_task` + `PMAdapter.set_dependency` for each `NewTask` in output
+  15. Create new tasks in list order: for each `NewTask`, call `PMAdapter.create_task` → receive real task ID; register it as `"new:{index}"` in a local resolution map. Once all tasks are created, call `PMAdapter.set_dependency` for each task, resolving any `"new:N"` refs in `depends_on` to their real task IDs via the map before the call.
   16. Re-read tasks via `PMAdapter.get_tasks` (includes newly created ones) → `TaskScheduler.start` → runs all ready tasks to completion
   17. Print wave summary: N complete, M needs-human-review, K blocked
   18. Exit (user re-runs after addressing needs-human-review tasks)

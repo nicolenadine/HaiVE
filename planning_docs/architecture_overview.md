@@ -45,7 +45,7 @@ Haive accesses the PM tool and the VCS host through separate pluggable adapter i
 │  get_tasks(project_id)       │  │  push_commits(branch, ...)   │
 │  create_task(...)            │  │  create_pr(title, ...)       │
 │  update_status(task_id, ...) │  │  merge_pr(pr_id)             │
-│  set_dependency(task_id, ...) │  │  add_pr_comment(pr_id, ...) │
+│  set_dependency(task_id, ...)│  │  add_pr_comment(pr_id, ...) │
 │  add_comment(task_id, body)  │  │  create_project_pr(...)      │
 │  read_new_comments(since)    │  │                              │
 │                              │  │  v1: GitHubVCSAdapter        │
@@ -63,7 +63,7 @@ Haive accesses the PM tool and the VCS host through separate pluggable adapter i
                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Task Scheduler                             │
-│  (deterministic — reads Tasks via PM Adapter, evaluates DAG,   │
+│  (deterministic — reads Tasks via PM Adapter, evaluates DAG,    │
 │   manages executor pool, caps concurrency at MAX_EXECUTORS)     │
 │  No RepoMapService involvement — pure sequencing only.          │
 └────────────────┬────────────────────────────────────────────────┘
@@ -77,26 +77,26 @@ Haive accesses the PM tool and the VCS host through separate pluggable adapter i
 │         PM Adapter:  update task status → in_progress           │
 │         RepoMapService.get_context_pack(task, token_budget)     │
 │                                                                 │
-│  ┌──────────────────┐  ┌───────────────┐                       │
-│  │ Context Assembler│→ │   LiteLLM     │                       │
-│  │ (formats context │  │ (sub-agent    │                       │
-│  │  pack into prompt│  │  call)        │                       │
-│  │  no service calls│  │               │                       │
-│  └──────────────────┘  └───────┬───────┘                       │
-│                                │                               │
-│                      ┌─────────▼───────┐                       │
-│                      │Output Validator │                       │
-│                      │(schema, deterministic)                  │
-│                      └─────────┬───────┘                       │
-│                                │                               │
-│                      ┌─────────▼───────┐                       │
-│                      │ Review Agent    │                       │
-│                      │(LLM-as-judge,   │                       │
-│                      │ receives broken │                       │
-│                      │ refs as context)│                       │
-│                      └─────────┬───────┘                       │
-│                                │                               │
-│               retry/escalate loop                              │
+│  ┌──────────────────┐  ┌───────────────┐                        │
+│  │ Context Assembler│→ │   LiteLLM     │                        │
+│  │ (formats context │  │ (sub-agent    │                        │
+│  │  pack into prompt│  │  call)        │                        │
+│  │  no service calls│  │               │                        │
+│  └──────────────────┘  └───────┬───────┘                        │
+│                                │                                │
+│                      ┌─────────▼───────┐                        │
+│                      │Output Validator │                        │
+│                      │(schema, deterministic)                   │
+│                      └─────────┬───────┘                        │
+│                                │                                │
+│                      ┌─────────▼───────┐                        │
+│                      │ Review Agent    │                        │
+│                      │(LLM-as-judge,   │                        │
+│                      │ receives broken │                        │
+│                      │ refs as context)│                        │
+│                      └─────────┬───────┘                        │
+│                                │                                │
+│               retry/escalate loop                               │
 │                                                                 │
 │  ON PASS:                                                       │
 │    VCS Adapter: commit → create PR → merge                      │

@@ -15,7 +15,7 @@ _TAG_KEYWORDS: dict[str, list[str]] = {
     "new_module":                ["new module", "new package", "new class", "introduce"],
     "refactor_only":             ["refactor", "rename", "restructure", "clean up", "simplify"],
     "external_api_integration":  ["api integration", "webhook", "third-party", "external service"],
-    "stub_implementation":       ["implement stub", "fill stub", "fill in stub", "stubbed logic", "module skeleton", "skeleton implementation", "implement skeleton", "unimplemented", "todo body", "todo bodies", "empty method body", "empty function body", "placeholder method", "placeholder function"],
+    "stub_implementation":       ["implement stub", "fill stub", "fill in stub", "stubbed logic", "implement module skeleton", "fill module skeleton", "skeleton implementation", "implement skeleton", "unimplemented", "todo body", "todo bodies", "empty method body", "empty function body", "placeholder method", "placeholder function"],
     "config_change":             ["config", "configuration", "settings", "env var"],
 }
 
@@ -26,7 +26,10 @@ _TAG_EXCLUSIONS: dict[str, list[str]] = {
         "do not create new service files", "do not create service files",
         "do not create new schemas", "do not create schemas",
         "do not create placeholder", "do not create placeholder files",
-        "existing-code", "existing code only", "modify existing", "update existing",
+        "existing-code only", "existing code only", "modify existing only", "update existing only",
+        "without creating new files", "without adding new files",
+        "do not create files", "do not add files",
+        "no new modules", "no new service files", "no new schemas", "no placeholder files",
     ],
     "stub_implementation": [
         "do not use implementation_agent", "not a stub", "not stubbed",

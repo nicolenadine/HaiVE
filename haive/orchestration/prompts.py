@@ -67,6 +67,29 @@ Choose agent roles by work type:
 - code_reviewer_agent: create a separate review/findings artifact only when explicitly requested by the milestone. Do not add a generic review task by default because every executor output is already reviewed internally.
 - security_reviewer_agent: use only for security-sensitive changes or required security review policies.
 
+## Task Description Quality Bar
+
+Each task description must give the assigned agent enough context to act without seeing the full milestone again.
+
+A good task description should include:
+- The specific behavior or artifact this task is responsible for.
+- The boundary of the task: what it should not change.
+- Any dependency assumptions, such as files or interfaces created by earlier tasks.
+- The reason for the dependency when it matters.
+- Any important compatibility or preservation requirement.
+
+Do not include:
+- Broad milestone-level goals that belong across multiple tasks.
+- Instructions for another agent role.
+- Generic quality gates, final review steps, or model-routing details.
+- Implementation micromanagement unless the milestone explicitly requires a specific approach.
+
+## Smaller-Model Execution Bias
+
+Assume downstream task agents may be smaller models with limited ability to infer missing intent. 
+Prefer explicit scope, concrete success conditions, and short task descriptions over clever or compressed wording. 
+Do not rely on downstream agents to infer dependencies, non-goals, or edge cases from the milestone.
+
 ## Dependency inference rules
 
 Before producing output, infer prerequisite relationships:
@@ -76,6 +99,37 @@ Before producing output, infer prerequisite relationships:
 - If documentation describes behavior added by implementation, documentation depends on implementation.
 - Independent tasks should have no dependencies only when they can safely run and merge in either order.
 - Do not leave dependencies empty merely because tasks are in the same milestone.
+
+## Acceptance Criteria Quality Bar
+
+For every new task, write acceptance criteria that are specific, observable, and scoped to that task's assigned agent role.
+
+Acceptance criteria SHOULD:
+- Describe externally checkable outcomes, not vague quality claims.
+- Include success and failure behavior when validation, errors, permissions, or edge cases are involved.
+- Preserve existing behavior unless the milestone explicitly changes it.
+- State important non-goals when they prevent scope creep.
+- Be narrow enough that a smaller task model can execute the task without inferring hidden requirements.
+- Match the assigned agent role. For example, a test task's criteria should describe test coverage, not implementation behavior.
+
+Acceptance criteria SHOULD NOT:
+- Use vague criteria like "works correctly", "is robust", "handles errors", "code is clean", or "tests pass" without explaining what must be true.
+- Require changes outside the task's role. For example, do not ask a code_editor_agent task to add tests or documentation.
+- Include generic review requirements. Executor-level review is automatic.
+- Mention model choice, token usage, internal orchestration behavior, or implementation strategy unless directly required by the milestone.
+- Bundle unrelated concerns into one criterion.
+
+Prefer criteria like:
+- "Invalid email input returns HTTP 422 with a descriptive validation error."
+- "Existing successful registration behavior is preserved for valid email and password input."
+- "Loading fails with an error message that identifies the missing required file path."
+- "Tests cover valid input, invalid input, and the missing-file failure case."
+
+Avoid criteria like:
+- "Validation works correctly."
+- "The implementation is robust."
+- "All tests pass."
+- "Code is reviewed."
 
 ## Review task rule
 
