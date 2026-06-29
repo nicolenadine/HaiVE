@@ -208,7 +208,7 @@ class TestRankFiles:
         paths = [r.path for r in results]
         assert any("auth_middleware" in p for p in paths)
         auth_result = next(r for r in results if "auth_middleware" in r.path)
-        assert "path contains" in auth_result.reason
+        assert "path matches" in auth_result.reason
 
     def test_ambiguous_symbol_name_produces_no_edge(self, tmp_path):
         # both files define a symbol with the same name — no edge should be created
