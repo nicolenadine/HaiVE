@@ -6,49 +6,14 @@ from pathlib import Path
 from typing import Iterator
 
 from haive.discovery.agent_md import AgentMdValidator
+from haive.discovery.agent_md_generation_prompt import AGENT_MD_GENERATION_SYSTEM_PROMPT
 from haive.discovery.constants import (
     AGENT_MD_GENERATION_MAX_TOKENS,
-    AGENT_MD_MAX_DESCRIPTION_LEN,
     AGENT_MD_MAX_GENERATION_RETRIES,
-    AGENT_MD_MAX_LINES,
-    AGENT_MD_MAX_SYMBOLS,
-    AGENT_MD_MIN_DESCRIPTION_LEN,
     SOURCE_EXTENSIONS,
 )
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
-
-_GENERATION_SYSTEM_PROMPT = f"""\
-You are a code-indexing assistant. Your only task is to write a concise, \
-structured agent.md file describing the contents of a source directory.
-
-Format rules (violations cause automatic retry):
-
-## Files  ← required section header, exactly this text
-
-One line per source file or immediate subdirectory:
-  filename.ext — one-line description
-  subdir/ — one-line description
-
-Rules for ## Files entries:
-- Separator is ' — ' (space, em dash U+2014, space). An ASCII hyphen is invalid.
-- Description is {AGENT_MD_MIN_DESCRIPTION_LEN}–{AGENT_MD_MAX_DESCRIPTION_LEN} characters, no trailing period.
-- List the filename only, not its full path. agent.md itself is never listed.
-- Subdirectory entries end with /.
-
-## Key Symbols  ← optional section header, exactly this text
-
-One line per notable symbol (class, function, method, or constant):
-  Name (kind) — start-end
-where kind is one of: class, function, method, constant
-and start-end are 1-based line numbers (both required; start ≤ end).
-At most {AGENT_MD_MAX_SYMBOLS} symbol entries.
-
-General rules:
-- No prose paragraphs. No headers other than ## Files and ## Key Symbols.
-- Total file must not exceed {AGENT_MD_MAX_LINES} lines.
-- Start your response directly with '## Files'. No preamble, no explanation.
-"""
 
 
 class AgentMdGenerationError(Exception):
@@ -113,7 +78,7 @@ class FileIndexService:
             response = self._client.call(
                 tier=self._tier,
                 prompt=prompt,
-                system=_GENERATION_SYSTEM_PROMPT,
+                system=AGENT_MD_GENERATION_SYSTEM_PROMPT,
                 max_tokens=AGENT_MD_GENERATION_MAX_TOKENS,
             )
             content = response.content.strip()
