@@ -270,6 +270,30 @@ Format per entry:
 
 ---
 
+### agent.md generation uses tool-calling to read source files, not filenames alone
+
+**Decision:** `AgentMdGenerationAgent` (Step 12) exposes a `read_file` tool and lets the LLM read each source file in full before writing the `agent.md`. File content is never passed as a block in the prompt. The agent reads files on demand via tool calls, then produces the `agent.md` as its final response.
+
+**Alternatives:** Pass filenames only (original implementation — LLM hallucinates symbol names and line numbers); pass full file content as prompt text; use AST extraction for symbols and pass content for descriptions only.
+
+**Rationale:** Passing filenames only causes the LLM to invent class names, method names, and line numbers it has never seen. Passing file content in the prompt works but requires pre-loading everything into the call whether the model needs it or not, and doesn't compose well with the incremental update path. Tool-calling lets the model read exactly what it needs, fits naturally into the `call_single()` pattern already established for `CodeDiscoveryAgent`, and produces accurate symbols and descriptions because the model has seen the actual code. The initial full-repo scan cost is a one-time expense; subsequent updates are per-changed-file only.
+
+**Tradeoff:** More LLM calls per directory (one per file read) versus a single prompt-stuffed call. At low-tier model prices and with incremental updates limiting re-work, this is acceptable. The accuracy gain justifies the additional calls.
+
+---
+
+### Incremental agent.md updates: deletions in code, reads only changed files
+
+**Decision:** `update_after_task` (Step 15) handles the three change types differently: **deletions** are handled entirely in code (parse the existing `agent.md`, strip the deleted file's entry and its symbol sub-entries — no LLM call); **additions and modifications** call `AgentMdGenerationAgent.update()`, which receives the current `agent.md` content and reads only the added/modified files via the `read_file` tool, preserving unchanged entries verbatim. Unchanged files in the same directory are never re-read.
+
+**Alternatives:** Re-generate the entire `agent.md` from scratch for any directory with a changed file (simpler but re-reads all files even if only one changed).
+
+**Rationale:** Full regeneration on any change would re-read every file in a directory whenever any single file is modified — wasteful for large directories and unnecessary since unchanged entries are already correct. Deletions need no model reasoning at all (just text manipulation). Surgical updates keep costs proportional to the amount of code that actually changed, which is the steady-state operation after the one-time initial scan. This also avoids drift: if the agent is asked to regenerate entries it didn't read, it may alter them based on stale assumptions.
+
+**Tradeoff:** The update prompt must instruct the model to preserve unchanged entries exactly, and the validator still checks the whole file after update. If the model accidentally rewrites entries it was told to preserve, the validation retry loop catches format violations but not content drift. Mitigated by explicit prompt instruction and by the fact that unchanged entries are shown in the prompt — the model has them as reference.
+
+---
+
 ### Low-tier model for agent.md generation and Code Discovery Agent
 
 **Decision:** Both `agent.md` generation and the Code Discovery Agent route to the cheapest configured model tier by default, through the existing named-config tier system (no new configuration mechanism).

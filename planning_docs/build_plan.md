@@ -384,11 +384,14 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 ### Step 12 — FileIndexService: agent.md Generation (`haive index`)
 
-**Goal:** Generate per-directory `agent.md` files for the whole repo using a low-tier LLM, validated against the Step 11 spec.
+**Goal:** Generate per-directory `agent.md` files for the whole repo using a low-tier LLM that reads actual source files via tool calling, validated against the Step 11 spec.
 
 **Scope**
+- `haive/discovery/agent_md_generation_agent.py` — `AgentMdGenerationAgent` class (parallel to `CodeDiscoveryAgent`)
+  - `generate(dir_path: str, source_files: list[str], subdirs: list[str], root: str) -> str` — full generation for a directory. Exposes a single tool `read_file(path: str) -> str` (same `_resolve_within_root` security boundary as `CodeDiscoveryAgent`). The agent reads every source file in the directory before writing the `agent.md`. The tool-calling loop terminates naturally once the agent has read the files it needs and produces a final text response containing the `agent.md` content.
+  - Model tier: low tier
 - `haive/discovery/file_index_service.py` — `FileIndexService` class
-  - `generate_all(root: str) -> None` — walks the repo respecting `.gitignore` (same directory-pruning behavior as the retired `RepoMapService` scanner: `.git` is the only hardcoded exclusion, everything else comes from `.gitignore`); for each directory containing at least one source file, calls the low-tier `ModelClient` to draft an `agent.md` describing that directory's files and subdirectories, validates the draft via `AgentMdValidator`, retries (bounded) on violation, then writes the file
+  - `generate_all(root: str) -> None` — walks the repo respecting `.gitignore` (`.git` is the only hardcoded exclusion, everything else comes from `.gitignore`); for each directory containing at least one source file, delegates to `AgentMdGenerationAgent.generate()`, validates the draft via `AgentMdValidator`, retries (bounded) on violation, then writes the file
   - Model tier: routed through the existing named-config tier system, defaulting to the lowest tier
 - `haive/cli.py` — `haive index` command: calls `generate_all()`
 - `haive/cli.py` — `haive index --validate` flag: runs `AgentMdValidator` against all existing `agent.md` files without regenerating, prints any violations found
@@ -453,20 +456,28 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 ### Step 15 — FileIndexService: Post-Task Regeneration
 
-**Goal:** Keep `agent.md` files in sync automatically after each task, without a startup scan.
+**Goal:** Keep `agent.md` files in sync after each task by reading only the files that actually changed — not re-reading the whole directory.
 
 **Scope**
+- `AgentMdGenerationAgent.update(dir_path: str, changed_files: list[str], existing_content: str, root: str) -> str` — incremental update mode (new method on the class from Step 12). Receives the current `agent.md` content and the subset of files that were added or modified. The agent reads only those files via `read_file`, then returns the complete updated `agent.md` with changed entries rewritten and unchanged entries preserved verbatim.
 - `FileIndexService.update_after_task(changed_files: list[str], root: str) -> None`
   - Called by the Task Executor after a task's changes are committed, using git output as the source of truth (`get_changed_files`) — not agent self-reporting
-  - Maps each changed file to its containing directory; regenerates only the `agent.md` files for directories with at least one changed file (a file add/delete also updates the parent directory's listing)
-  - Each regenerated `agent.md` goes through the same generate → validate → retry path as `generate_all` (Step 12)
+  - Groups changed files by their containing directory
+  - For each affected directory:
+    - **Deleted files**: handled in code — parse the existing `agent.md`, strip the entry for each deleted file and its symbol sub-entries. No LLM call required.
+    - **Added or modified files**: call `AgentMdGenerationAgent.update()` with the existing agent.md content and only the added/modified files. The agent reads those files and rewrites only their entries.
+    - If the directory has no existing `agent.md` (newly created directory), falls back to `AgentMdGenerationAgent.generate()` (full generation).
+  - Parent directory updates: if a file addition creates a new source directory, or a deletion removes the last source file from a directory, the parent directory's `agent.md` is also updated (to add or remove the subdirectory entry).
+  - Each updated `agent.md` goes through the same validate → retry path as `generate_all`
 - `haive/discovery/git_utils.py` — `get_changed_files(repo_root: str) -> list[str]` — runs `git diff --name-only` and `git status --porcelain`
-- Unit tests: changing one file regenerates only its directory's `agent.md`, not unrelated directories; adding a new file updates the directory's listing; deleting a file removes its entry
+- Unit tests: modifying a file updates only its directory's `agent.md`; only the modified file's entry is rewritten (unchanged entries are preserved); adding a new file updates the directory listing; deleting a file removes its entry without touching others; a brand-new directory triggers full generation
 
 **Success Criteria**
-- [ ] Editing a file in `dir/` regenerates `dir/agent.md` only
-- [ ] Adding a new file to a directory results in that file appearing in the regenerated `agent.md`
-- [ ] Deleting a file removes its entry from the regenerated `agent.md`
+- [ ] Editing a file in `dir/` updates `dir/agent.md` only — no other `agent.md` files are touched
+- [ ] Only the entry for the modified file is rewritten; all other entries remain verbatim
+- [ ] Adding a new file appends its entry without re-reading unchanged files
+- [ ] Deleting a file removes its entry (and symbol sub-entries) without an LLM call
+- [ ] A newly created directory triggers full generation via `AgentMdGenerationAgent.generate()`
 - [ ] `get_changed_files` is driven by git output, not agent-reported file lists
 
 **Deferred:** None — this closes the loop opened in Step 12. No startup scan is ever performed; `haive run` only reads existing `agent.md` files (see Step 23).
