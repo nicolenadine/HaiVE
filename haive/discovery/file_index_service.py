@@ -78,6 +78,56 @@ class FileIndexService:
 
         return loaded
 
+    def update_after_task(self, changed_files: list[str], root: str) -> None:
+        """Incrementally update agent.md files for directories touched by a task.
+
+        Groups changed_files by directory. For each affected directory:
+        - Deleted files: entries stripped in code (no LLM call).
+        - Added/modified files: AgentMdGenerationAgent.update() rewrites only
+          those entries, preserving all others verbatim.
+        - New directory (no existing agent.md): falls back to generate().
+        Non-source files and agent.md itself are ignored.
+        """
+        from collections import defaultdict
+
+        by_dir: dict[str, dict[str, list[str]]] = defaultdict(
+            lambda: {"modified": [], "deleted": []}
+        )
+        for file_path in changed_files:
+            filename = os.path.basename(file_path)
+            if not self._is_source_file(filename):
+                continue
+            dir_rel = os.path.dirname(file_path)
+            full_path = os.path.join(root, file_path)
+            if os.path.exists(full_path):
+                by_dir[dir_rel]["modified"].append(filename)
+            else:
+                by_dir[dir_rel]["deleted"].append(filename)
+
+        for dir_rel, changes in by_dir.items():
+            dir_abs = os.path.join(root, dir_rel) if dir_rel else root
+            agent_md_path = Path(dir_abs) / "agent.md"
+
+            if changes["deleted"] and agent_md_path.is_file():
+                content = agent_md_path.read_text(encoding="utf-8")
+                content = self._remove_deleted_entries(content, set(changes["deleted"]))
+                agent_md_path.write_text(content, encoding="utf-8")
+
+            if changes["modified"]:
+                if agent_md_path.is_file():
+                    existing = agent_md_path.read_text(encoding="utf-8")
+                    self._update_for_dir(dir_abs, changes["modified"], existing, root)
+                else:
+                    source_files = sorted(
+                        f for f in os.listdir(dir_abs) if self._is_source_file(f)
+                    )
+                    subdirs = sorted(
+                        d for d in os.listdir(dir_abs)
+                        if os.path.isdir(os.path.join(dir_abs, d))
+                        and not d.startswith(".")
+                    )
+                    self._generate_for_dir(dir_abs, source_files, subdirs, root)
+
     def validate_all(self, root: str) -> dict[str, list[str]]:
         """Return {relative_path: [violations]} for every agent.md found under root.
 
@@ -133,6 +183,64 @@ class FileIndexService:
             rel = os.path.relpath(dir_path, root) if dir_path != root else "."
             raise AgentMdGenerationError(
                 f"Failed to generate a valid agent.md for '{rel}' after "
+                f"{AGENT_MD_MAX_GENERATION_RETRIES} attempts. "
+                f"Last violations: {violations}"
+            )
+
+        Path(os.path.join(dir_path, "agent.md")).write_text(
+            content + "\n", encoding="utf-8"
+        )
+
+    @staticmethod
+    def _remove_deleted_entries(content: str, deleted_files: set[str]) -> str:
+        """Strip file entries (and their symbol sub-entries) for deleted files.
+
+        Operates purely on text — no LLM call required.
+        """
+        lines = content.splitlines(keepends=True)
+        result: list[str] = []
+        in_deleted_entry = False
+
+        for line in lines:
+            stripped = line.rstrip("\n").rstrip("\r")
+            if stripped.startswith("  "):
+                if in_deleted_entry:
+                    continue
+            else:
+                in_deleted_entry = False
+                if " — " in stripped:
+                    filename = stripped.split(" — ", 1)[0]
+                    if filename in deleted_files:
+                        in_deleted_entry = True
+                        continue
+            result.append(line)
+
+        return "".join(result)
+
+    def _update_for_dir(
+        self,
+        dir_path: str,
+        changed_files: list[str],
+        existing_content: str,
+        root: str,
+    ) -> None:
+        violations: list[str] = []
+        content = ""
+        prior_violations: list[str] | None = None
+
+        for _ in range(AGENT_MD_MAX_GENERATION_RETRIES):
+            content = self._agent.update(
+                dir_path, changed_files, existing_content, root, prior_violations
+            )
+            violations = self._validator.validate(content)
+            if not violations:
+                break
+            prior_violations = violations
+
+        if violations:
+            rel = os.path.relpath(dir_path, root) if dir_path != root else "."
+            raise AgentMdGenerationError(
+                f"Failed to update agent.md for '{rel}' after "
                 f"{AGENT_MD_MAX_GENERATION_RETRIES} attempts. "
                 f"Last violations: {violations}"
             )

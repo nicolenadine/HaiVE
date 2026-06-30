@@ -81,6 +81,46 @@ def _build_user_prompt(
     return "\n".join(parts)
 
 
+def _build_update_user_prompt(
+    dir_path: str,
+    changed_files: list[str],
+    existing_content: str,
+    root: str,
+    prior_violations: list[str] | None = None,
+) -> str:
+    rel = os.path.relpath(dir_path, root) if dir_path != root else "."
+    parts = [
+        f"Update the agent.md for directory: {rel}",
+        "",
+        "Current agent.md (preserve all unchanged entries verbatim):",
+        "",
+        existing_content.strip(),
+        "",
+        "Files that were added or modified (read each one, then rewrite only their entries):",
+    ]
+    for f in changed_files:
+        file_path = f if rel == "." else f"{rel}/{f}"
+        parts.append(f"  {file_path}")
+    parts.append("")
+    parts.append(
+        "Instructions: read each changed file using read_file. "
+        "Return the complete updated agent.md. "
+        "Preserve every unchanged file entry and its symbol sub-entries verbatim. "
+        "Only rewrite entries for the files listed above. "
+        "If a listed file is new (not present in the existing agent.md), insert its entry "
+        "in alphabetical order among the other file entries. "
+        "Do not list agent.md as a file entry. "
+        "Start your response directly with '## Files' — no preamble."
+    )
+    if prior_violations:
+        violation_lines = "\n".join(f"  - {v}" for v in prior_violations)
+        parts.append("")
+        parts.append(
+            f"Your previous attempt had format violations — fix them all:\n{violation_lines}"
+        )
+    return "\n".join(parts)
+
+
 class AgentMdGenerationAgent:
     """Reads each source file in a directory via tool calling and writes an agent.md.
 
@@ -138,6 +178,63 @@ class AgentMdGenerationAgent:
         messages.append({
             "role": "user",
             "content": "Write the agent.md now based on what you have read. Start with '## Files'.",
+        })
+        final = self._client.call_single(
+            tier=self._tier,
+            messages=messages,
+            max_tokens=AGENT_MD_GENERATION_MAX_TOKENS,
+        )
+        return (final.content or "").strip()
+
+    def update(
+        self,
+        dir_path: str,
+        changed_files: list[str],
+        existing_content: str,
+        root: str,
+        prior_violations: list[str] | None = None,
+    ) -> str:
+        """Incrementally update an existing agent.md for added/modified files only.
+
+        Reads each changed file via read_file, then returns the full updated
+        agent.md with unchanged entries preserved verbatim.
+        """
+        messages: list[dict] = [
+            {"role": "system", "content": AGENT_MD_GENERATION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": _build_update_user_prompt(
+                    dir_path, changed_files, existing_content, root, prior_violations
+                ),
+            },
+        ]
+        max_tool_calls = len(changed_files) + 5
+        tool_call_count = 0
+
+        while tool_call_count < max_tool_calls:
+            turn = self._client.call_single(
+                tier=self._tier,
+                messages=messages,
+                max_tokens=AGENT_MD_GENERATION_MAX_TOKENS,
+                tools=_TOOLS,
+            )
+            messages.append(self._assistant_message(turn))
+
+            if not turn.tool_calls:
+                return (turn.content or "").strip()
+
+            for tc in turn.tool_calls:
+                result = self._read_file(tc.arguments.get("path", ""), root)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+                tool_call_count += 1
+
+        messages.append({
+            "role": "user",
+            "content": "Write the complete updated agent.md now. Start with '## Files'.",
         })
         final = self._client.call_single(
             tier=self._tier,
