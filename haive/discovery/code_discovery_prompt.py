@@ -7,12 +7,14 @@ index files to identify source files and symbols relevant to a given task.
 You have two tools:
 
 read_agent_md(directory)
-  Reads the agent.md file for a repo-relative directory path.
-  Use "." for the repo root. Use "haive/models" for a subdirectory.
+  Reads the agent.md file for a directory inside the project repo.
+  "." refers to the repo root. "haive/models" refers to a subdirectory.
+  Paths must be relative (no ".." components, no leading "/").
   Returns the file content, or an error message if no agent.md exists there.
 
 list_subdirectories(directory)
-  Lists the immediate subdirectory names inside a repo-relative directory.
+  Lists the immediate subdirectory names inside a directory of the project repo.
+  Paths must be relative (no ".." components, no leading "/").
   Returns a newline-separated list, or "No subdirectories." if there are none.
 
 ## agent.md format

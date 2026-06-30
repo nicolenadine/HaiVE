@@ -29,8 +29,9 @@ _TOOLS: list[dict] = [
                     "directory": {
                         "type": "string",
                         "description": (
-                            "Repo-relative path to the directory, e.g. '.' or "
-                            "'haive/models'. Never include a trailing slash."
+                            "Relative path inside the project repo, e.g. '.' or "
+                            "'haive/models'. Must not contain '..' or start with '/'. "
+                            "Paths outside the repo are rejected."
                         ),
                     }
                 },
@@ -52,7 +53,10 @@ _TOOLS: list[dict] = [
                 "properties": {
                     "directory": {
                         "type": "string",
-                        "description": "Repo-relative path to the directory, e.g. '.' or 'haive'.",
+                        "description": (
+                            "Relative path inside the project repo, e.g. '.' or "
+                            "'haive'. Must not contain '..' or start with '/'."
+                        ),
                     }
                 },
                 "required": ["directory"],
@@ -149,18 +153,34 @@ class CodeDiscoveryAgent:
             return self._list_subdirectories(arguments.get("directory", "."), root)
         return f"Unknown tool: {name}"
 
+    @staticmethod
+    def _resolve_within_root(directory: str, root: str) -> Path | None:
+        """Return the resolved path only if it stays inside root; None otherwise."""
+        root_resolved = Path(root).resolve()
+        candidate = (root_resolved / directory).resolve()
+        try:
+            candidate.relative_to(root_resolved)
+            return candidate
+        except ValueError:
+            return None
+
     def _read_agent_md(self, directory: str, root: str) -> str:
-        path = Path(root) / directory / "agent.md"
+        safe = self._resolve_within_root(directory, root)
+        if safe is None:
+            return f"Access denied: {directory!r} is outside the project repo"
+        path = safe / "agent.md"
         if not path.is_file():
             return f"No agent.md found in {directory}"
         return path.read_text(encoding="utf-8")
 
     def _list_subdirectories(self, directory: str, root: str) -> str:
-        dir_path = Path(root) / directory
-        if not dir_path.is_dir():
+        safe = self._resolve_within_root(directory, root)
+        if safe is None:
+            return f"Access denied: {directory!r} is outside the project repo"
+        if not safe.is_dir():
             return f"Directory not found: {directory}"
         subdirs = sorted(
-            d.name for d in dir_path.iterdir()
+            d.name for d in safe.iterdir()
             if d.is_dir() and not d.name.startswith(".")
         )
         return "\n".join(subdirs) if subdirs else "No subdirectories."

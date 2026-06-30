@@ -299,3 +299,22 @@ class TestToolExecution:
         second_call_messages = mock_client.call_single.call_args_list[1].kwargs["messages"]
         tool_msg = next(m for m in second_call_messages if m["role"] == "tool")
         assert "Directory not found" in tool_msg["content"]
+
+    @pytest.mark.parametrize("traversal_path", [
+        "../../../etc",
+        "../../..",
+        "/etc",
+        "/",
+    ])
+    def test_path_traversal_is_rejected(self, agent, mock_client, repo_root, traversal_path):
+        mock_client.call_single.side_effect = [
+            _turn_with_tools(_tool_call("read_agent_md", directory=traversal_path)),
+            _turn_with_content(_EMPTY_JSON),
+        ]
+
+        result = agent.discover(_make_task(), repo_root, token_budget=4000)
+
+        second_call_messages = mock_client.call_single.call_args_list[1].kwargs["messages"]
+        tool_msg = next(m for m in second_call_messages if m["role"] == "tool")
+        assert "Access denied" in tool_msg["content"]
+        assert result.status == "empty"
