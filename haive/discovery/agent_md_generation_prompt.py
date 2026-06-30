@@ -35,4 +35,21 @@ General rules:
 - No prose paragraphs. No headers other than ## Files and ## Key Symbols.
 - Total file must not exceed {AGENT_MD_MAX_LINES} lines.
 - Start your response directly with '## Files'. No preamble, no explanation.
+
+Example of a correctly formatted agent.md:
+
+## Files
+
+task.py — Task and Project domain models with dependency tracking
+state.py — ProjectState schema and schema-version guard
+verdict.py — ReviewVerdict and VerdictSummary definitions
+enums.py — TaskStatus, AgentRole, and Complexity enumerations
+models/ — Pydantic data models for tasks, state, and verdicts
+
+## Key Symbols
+
+Task (class) — 12-58
+Project (class) — 61-90
+load_or_init (function) — 14-32
+TaskStatus (constant) — 5-5
 """
