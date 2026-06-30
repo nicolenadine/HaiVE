@@ -21,6 +21,7 @@ from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.review import ReviewVerdict
 from haive.models.state import ProjectState
 from haive.models.task import AttemptLogEntry, Task, TaskExecutionRecord
+from haive.observability.spans import task_span
 from haive.persistence.state_store import StateStore
 from haive.registry.agent_registry import AgentRegistry
 
@@ -55,6 +56,34 @@ class TaskExecutor:
         self._assembler = ContextAssembler()
 
     def run(
+        self,
+        task: Task,
+        project_id: str,
+        project_state: ProjectState,
+        discovery_agent: CodeDiscoveryAgent,
+        file_index: FileIndexService,
+        registry: AgentRegistry,
+        pm: PMAdapter,
+        vcs: VCSAdapter,
+        state_store: StateStore,
+    ) -> TaskExecutionRecord:
+        with task_span(task) as span:
+            record = self._run_inner(
+                task, project_id, project_state,
+                discovery_agent, file_index, registry, pm, vcs, state_store,
+            )
+            if record.verdict is not None:
+                span.set_attribute("verdict.passed", record.verdict.passed)
+            if record.prompt_version is not None:
+                span.set_attribute("agent.prompt_version", record.prompt_version)
+            if record.tier_used is not None:
+                span.set_attribute("tier.name", record.tier_used.value)
+            if record.model_used is not None:
+                span.set_attribute("tier.model_used", record.model_used)
+            span.set_attribute("attempt.number", record.total_attempts)
+        return record
+
+    def _run_inner(
         self,
         task: Task,
         project_id: str,

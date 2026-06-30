@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Concurrency
     max_executors: int = 4
 
+    # Observability
+    phoenix_otlp_endpoint: str = "http://localhost:6006/v1/traces"
+
     # Providers
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
