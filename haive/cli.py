@@ -202,6 +202,63 @@ def index(
     typer.echo(f"Done. agent.md files written in {elapsed:.1f}s.")
 
 
+# ── Discover command ──────────────────────────────────────────────────────────
+
+@app.command("discover")
+def discover(
+    description: str = typer.Argument(..., help="What the task needs to accomplish."),
+    title: str = typer.Option("", "--title", help="Short task title (defaults to first 60 chars of description)."),
+    budget: int = typer.Option(16000, "--budget", help="Token budget hint passed to the discovery agent."),
+) -> None:
+    """Run the Code Discovery Agent against the current repo's agent.md tree."""
+    import os
+    import types
+
+    _preflight_checks()
+    root = os.getcwd()
+
+    from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
+    from haive.llm.model_client import ModelClient
+    from haive.llm.tier_config import TierConfig
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    task_title = title or description[:60]
+    task = types.SimpleNamespace(title=task_title, description=description)
+
+    tier_config = TierConfig.from_settings(settings)
+    agent = CodeDiscoveryAgent(ModelClient(settings), tier_config.low)
+
+    typer.echo(f'Discovering for: "{task_title}"\n')
+    start = time.perf_counter()
+    result = agent.discover(task, root, budget)
+    elapsed = time.perf_counter() - start
+
+    typer.echo(f"Status: {result.status}  ({elapsed:.1f}s)\n")
+
+    if not result.sections:
+        typer.echo("No relevant sections found.")
+        return
+
+    typer.echo(f"Sections ({len(result.sections)}, most relevant first):\n")
+    for i, s in enumerate(result.sections, 1):
+        location = s.file
+        if s.symbol:
+            location += f"  ·  {s.symbol}"
+        if s.start_line and s.end_line:
+            location += f" — {s.start_line}-{s.end_line}"
+        elif s.full:
+            location += "  ·  full file"
+        typer.echo(f"  {i}. {location}")
+        typer.echo(f"     {s.reason}")
+        typer.echo()
+
+
 # ── Run command ───────────────────────────────────────────────────────────────
 
 @app.command()
