@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import litellm
 
 from haive.llm.errors import APIError
@@ -12,9 +14,9 @@ from haive.models.task import TokenUsage
 class ModelClient:
     def __init__(self, settings: Settings) -> None:
         if settings.anthropic_api_key:
-            litellm.anthropic_api_key = settings.anthropic_api_key
+            os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
         if settings.openai_api_key:
-            litellm.openai_api_key = settings.openai_api_key
+            os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 
     def call(self, tier: Tier, prompt: str, system: str, max_tokens: int) -> ModelResponse:
         primary = tier.models[0]

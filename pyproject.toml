@@ -13,8 +13,6 @@ dependencies = [
     "pydantic-settings",
     "typer",
     "pytest",
-    "duckdb",
-    "tree-sitter",
     "opentelemetry-sdk",
     "openinference-instrumentation-litellm",
     "arize-phoenix",

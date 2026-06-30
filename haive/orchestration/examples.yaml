@@ -1,0 +1,377 @@
+examples:
+  - id: missing_files_before_validation
+    pattern_name: Missing files before validation/loading changes
+    tags:
+      - new_files_required
+      - existing_code_edit
+      - validation_logic
+      - tests_required
+    use_when:
+      - A milestone requires new config files, schema files, templates, fixtures, seed files, or placeholders to exist before existing loading or validation code can reference them.
+      - Existing startup, loading, parsing, configuration, or validation code must be updated after the required files are created.
+      - Tests should verify both missing-file failure behavior and successful loading when the files exist.
+    do_not_use_when:
+      - All required files already exist and only existing code needs to change.
+      - The target code is an empty stub or TODO body.
+      - The milestone only asks for documentation, tests, or a standalone review artifact.
+    default_task_graph:
+      - agent_role: scaffold_agent
+        purpose: Create the missing files, directories, schema files, templates, fixtures, seed files, or placeholders required by the milestone.
+        complexity: low
+        depends_on: []
+      - agent_role: code_editor_agent
+        purpose: Update existing loading, parsing, startup, configuration, or validation code to require and use the newly created files.
+        complexity: medium
+        depends_on: [0]
+      - agent_role: test_generator_agent
+        purpose: Add or update tests proving missing required files fail clearly and valid files load successfully.
+        complexity: medium
+        depends_on: [1]
+    common_wrong_outputs:
+      - "Using implementation_agent to modify existing loading, parsing, startup, configuration, or validation code."
+      - "Creating the validation task without depending on the scaffold task that creates the referenced files."
+      - "Adding a generic code_reviewer_agent task even though executor-level review is automatic."
+    mini_example:
+      milestone: Add product import validation that requires default CSV templates to exist before startup validation runs.
+      expected_tasks:
+        - title: Create default CSV import template files
+          agent_role: scaffold_agent
+          complexity: low
+          depends_on: []
+        - title: Validate required CSV templates during import startup checks
+          agent_role: code_editor_agent
+          complexity: medium
+          depends_on: [0]
+        - title: Add tests for required CSV template validation
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [1]
+
+  - id: existing_code_validation_change
+    pattern_name: Existing-code validation change
+    tags:
+      - existing_code_edit
+      - validation_logic
+      - tests_required
+    use_when:
+      - A milestone changes validation behavior in existing working code.
+      - Existing handlers, services, loaders, forms, serializers, or managers need stricter checks or clearer errors.
+      - Tests should lock down the new validation contract.
+    do_not_use_when:
+      - New files must be created before the validation code can run.
+      - The target code is an empty stub, TODO body, or unimplemented interface.
+      - The milestone only asks for tests documenting current behavior.
+    default_task_graph:
+      - agent_role: code_editor_agent
+        purpose: Modify existing working code to add or adjust validation behavior without creating new files.
+        complexity: medium
+        depends_on: []
+      - agent_role: test_generator_agent
+        purpose: Add tests for valid input, invalid input, edge cases, and clear failure messages.
+        complexity: medium
+        depends_on: [0]
+    common_wrong_outputs:
+      - "Using implementation_agent just because the milestone says 'implement validation'."
+      - "Creating a scaffold task when the target files already exist."
+      - "Adding a generic code_reviewer_agent task as a final quality gate."
+    mini_example:
+      milestone: Update user registration to reject invalid email addresses and weak passwords with clear validation errors.
+      expected_tasks:
+        - title: Add email and password validation to user registration
+          agent_role: code_editor_agent
+          complexity: medium
+          depends_on: []
+        - title: Add registration validation tests
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [0]
+
+  - id: new_module_with_stubs
+    pattern_name: New module with stubs
+    tags:
+      - new_module
+      - new_files_required
+      - stub_implementation
+      - tests_required
+    use_when:
+      - A milestone introduces a new module, package, class, or interface that does not yet exist.
+      - The first task should define file structure and public interfaces before logic is filled in.
+      - Implementation can be done against clear stubs, signatures, TODO bodies, or unimplemented methods created by the scaffold task.
+    do_not_use_when:
+      - The milestone only modifies existing working code.
+      - There are no stubs, skeletons, empty methods, TODO bodies, or unimplemented interfaces to fill.
+      - The milestone is a behavior-preserving refactor.
+    default_task_graph:
+      - agent_role: scaffold_agent
+        purpose: Create the new module/package files with class/function signatures, docstrings, and explicit TODO or stub bodies.
+        complexity: medium
+        depends_on: []
+      - agent_role: implementation_agent
+        purpose: Fill in the stubbed logic while preserving the scaffolded interfaces and file structure.
+        complexity: medium
+        depends_on: [0]
+      - agent_role: test_generator_agent
+        purpose: Add tests covering the new module behavior and edge cases.
+        complexity: medium
+        depends_on: [1]
+    common_wrong_outputs:
+      - "Using code_editor_agent for empty stub bodies that were intentionally created for later implementation."
+      - "Using implementation_agent before a scaffold task has created the stubs."
+      - "Combining file creation and implementation into one large task when interfaces should be established separately."
+    mini_example:
+      milestone: Introduce a notification service module with stubbed email and SMS delivery methods, then implement delivery routing and tests.
+      expected_tasks:
+        - title: Scaffold notification service module and public interfaces
+          agent_role: scaffold_agent
+          complexity: medium
+          depends_on: []
+        - title: Implement notification delivery routing from scaffolded stubs
+          agent_role: implementation_agent
+          complexity: medium
+          depends_on: [0]
+        - title: Add notification service tests
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [1]
+
+  - id: cli_command_addition
+    pattern_name: CLI command addition in existing app
+    tags:
+      - cli_change
+      - existing_code_edit
+      - tests_required
+      - docs_required
+    use_when:
+      - A milestone adds or changes a command, option, flag, argument, or subcommand in an existing CLI application.
+      - Existing command structure should be extended rather than replaced.
+      - User-facing CLI behavior, help text, or usage documentation should be updated.
+    do_not_use_when:
+      - The CLI package or command app does not exist yet and must be scaffolded first.
+      - The task only updates documentation without changing CLI behavior.
+      - The milestone asks only for internal API behavior with no command-line surface.
+    default_task_graph:
+      - agent_role: code_editor_agent
+        purpose: Add or update the CLI command, option, flag, validation, help text, and user-facing error behavior in the existing CLI app.
+        complexity: medium
+        depends_on: []
+      - agent_role: test_generator_agent
+        purpose: Add CLI tests for success behavior, option parsing, help output, and error cases.
+        complexity: medium
+        depends_on: [0]
+      - agent_role: documentation_writer_agent
+        purpose: Update README or command documentation for the new CLI usage.
+        complexity: low
+        depends_on: [1]
+    common_wrong_outputs:
+      - "Using scaffold_agent to recreate an existing CLI app."
+      - "Using implementation_agent for edits to an already-working CLI command."
+      - "Updating documentation before the CLI behavior is finalized."
+    mini_example:
+      milestone: Add a --format json option to an existing export command and document the new usage.
+      expected_tasks:
+        - title: Add --format json handling to the existing export command
+          agent_role: code_editor_agent
+          complexity: medium
+          depends_on: []
+        - title: Add CLI tests for JSON export output
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [0]
+        - title: Document JSON export command usage
+          agent_role: documentation_writer_agent
+          complexity: low
+          depends_on: [1]
+
+  - id: database_migration_with_security_review
+    pattern_name: Database migration with security review
+    tags:
+      - database_migration
+      - security_sensitive
+      - tests_required
+    use_when:
+      - A milestone includes a database migration, schema change, ALTER TABLE operation, ORM model change, or persistence-layer change.
+      - A security or safety review is required before downstream work proceeds.
+      - Tests should verify migration behavior, rollback assumptions, constraints, defaults, or data access behavior after review.
+    do_not_use_when:
+      - The task only reads data without changing schema or persistence behavior.
+      - The task is a pure application-layer validation change.
+      - The milestone asks for a standalone general code review rather than migration safety.
+    default_task_graph:
+      - agent_role: database_agent
+        purpose: Create the migration, ORM/schema update, or data access change required by the milestone.
+        complexity: high
+        depends_on: []
+      - agent_role: security_reviewer_agent
+        purpose: Review the migration for data loss risk, unsafe defaults, missing rollback, authorization impact, and secret exposure.
+        complexity: high
+        depends_on: [0]
+      - agent_role: test_generator_agent
+        purpose: Add tests for migration expectations, schema compatibility, and affected data access behavior.
+        complexity: medium
+        depends_on: [1]
+    common_wrong_outputs:
+      - "Skipping security_reviewer_agent after a migration."
+      - "Using code_editor_agent for schema migration work that belongs to database_agent."
+      - "Letting tests run in parallel with the required migration safety review."
+    mini_example:
+      milestone: Add a nullable last_login_at column to the users table and update the user data access layer.
+      expected_tasks:
+        - title: Add users.last_login_at migration and data access update
+          agent_role: database_agent
+          complexity: high
+          depends_on: []
+        - title: Review last_login_at migration safety
+          agent_role: security_reviewer_agent
+          complexity: high
+          depends_on: [0]
+        - title: Add tests for last_login_at persistence
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [1]
+
+  - id: documentation_only_change
+    pattern_name: Documentation-only change
+    tags:
+      - docs_required
+    use_when:
+      - A milestone only asks for README updates, architecture docs, usage docs, API docs, docstrings, comments, or troubleshooting notes.
+      - No code behavior, tests, schemas, configuration, database, or CLI behavior should change.
+      - The desired output is explanatory text rather than executable behavior.
+    do_not_use_when:
+      - Documentation depends on code that has not been implemented yet.
+      - The milestone asks to update docs and code together.
+      - The docs describe a new command, API, schema, or behavior that still needs implementation.
+    default_task_graph:
+      - agent_role: documentation_writer_agent
+        purpose: Update the requested documentation, docstrings, comments, README content, API notes, or troubleshooting guide without changing code behavior.
+        complexity: low
+        depends_on: []
+    common_wrong_outputs:
+      - "Creating code_editor_agent tasks for a docs-only milestone."
+      - "Adding tests when no behavior changed."
+      - "Updating documentation before the implementation it describes exists."
+    mini_example:
+      milestone: Update README instructions for configuring payment provider API keys in local development.
+      expected_tasks:
+        - title: Document local payment provider configuration
+          agent_role: documentation_writer_agent
+          complexity: low
+          depends_on: []
+
+  - id: refactor_only_change
+    pattern_name: Refactor-only change
+    tags:
+      - refactor_only
+      - existing_code_edit
+      - tests_required
+    use_when:
+      - A milestone explicitly asks to rename, restructure, simplify, extract helpers, reduce duplication, or improve maintainability without behavior change.
+      - Existing tests should continue to pass, and characterization tests may be added when behavior needs to be protected.
+      - The goal is maintainability, not new functionality.
+    do_not_use_when:
+      - The milestone adds behavior, fixes a bug, or changes a public contract.
+      - New files or modules must be created before the refactor can occur.
+      - The task involves database schema, external APIs, or security-sensitive logic.
+    default_task_graph:
+      - agent_role: refactoring_agent
+        purpose: Improve structure, naming, readability, or maintainability of existing code without changing observable behavior.
+        complexity: medium
+        depends_on: []
+      - agent_role: test_generator_agent
+        purpose: Add or update characterization tests that confirm behavior is preserved.
+        complexity: medium
+        depends_on: [0]
+    common_wrong_outputs:
+      - "Using code_editor_agent for a behavior-preserving refactor."
+      - "Introducing new behavior under the cover of a refactor."
+      - "Adding a generic code_reviewer_agent task instead of relying on executor-level review."
+    mini_example:
+      milestone: Refactor order total calculation to reduce duplication without changing pricing behavior.
+      expected_tasks:
+        - title: Refactor order total calculation without behavior changes
+          agent_role: refactoring_agent
+          complexity: medium
+          depends_on: []
+        - title: Add characterization tests for order total calculation
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [0]
+
+  - id: external_api_integration
+    pattern_name: External API integration
+    tags:
+      - external_api_integration
+      - config_change
+      - tests_required
+      - security_sensitive
+    use_when:
+      - A milestone connects the application to a third-party service, webhook, hosted API, or provider SDK.
+      - The work includes credentials, tokens, request/response mapping, retries, timeouts, rate limits, or network error handling.
+      - Tests should mock or fake the external service rather than call the real API.
+    do_not_use_when:
+      - The task only modifies internal business logic after an integration already exists.
+      - The task is only configuration documentation without API code.
+      - The integration requires a database migration as the primary change.
+    default_task_graph:
+      - agent_role: api_integration_agent
+        purpose: Implement the external API client, authentication handling, request/response mapping, retries, timeouts, and safe error handling.
+        complexity: high
+        depends_on: []
+      - agent_role: security_reviewer_agent
+        purpose: Review credential handling, secret exposure risk, permission scope, unsafe logging, and network error behavior.
+        complexity: high
+        depends_on: [0]
+      - agent_role: test_generator_agent
+        purpose: Add tests using mocks or fakes for success, failure, timeout, auth, and rate-limit behavior.
+        complexity: medium
+        depends_on: [1]
+    common_wrong_outputs:
+      - "Using code_editor_agent for a task whose primary concern is third-party API integration."
+      - "Testing against the live external API instead of mocks or fakes."
+      - "Skipping security review when tokens, secrets, auth, or permissions are involved."
+    mini_example:
+      milestone: Integrate shipping-rate lookup with a third-party carrier API using API-key authentication and mocked tests.
+      expected_tasks:
+        - title: Implement carrier shipping-rate API client
+          agent_role: api_integration_agent
+          complexity: high
+          depends_on: []
+        - title: Review carrier API credential and logging safety
+          agent_role: security_reviewer_agent
+          complexity: high
+          depends_on: [0]
+        - title: Add mocked carrier API integration tests
+          agent_role: test_generator_agent
+          complexity: medium
+          depends_on: [1]
+
+  - id: standalone_review_artifact
+    pattern_name: Standalone review artifact requested
+    tags:
+      - review_artifact_requested
+      - existing_code_edit
+    use_when:
+      - A milestone explicitly asks for a standalone review, audit report, findings report, or review artifact.
+      - The requested deliverable is a written findings list rather than code changes.
+      - The review is the primary task, not a generic final quality gate.
+    do_not_use_when:
+      - The milestone only needs normal executor-level review after implementation.
+      - The milestone asks to fix issues rather than produce findings.
+      - The review is security-specific; use security_reviewer_agent instead.
+    default_task_graph:
+      - agent_role: code_reviewer_agent
+        purpose: Produce the explicitly requested standalone review findings artifact without changing code.
+        complexity: medium
+        depends_on: []
+    common_wrong_outputs:
+      - "Adding code_reviewer_agent as a generic final quality gate after every implementation task."
+      - "Using code_reviewer_agent when the milestone asks for security review."
+      - "Changing code when the requested output is only a review artifact."
+    mini_example:
+      milestone: Produce a standalone findings report for checkout flow error handling.
+      expected_tasks:
+        - title: Review checkout error handling and produce findings report
+          agent_role: code_reviewer_agent
+          complexity: medium
+          depends_on: []
+
