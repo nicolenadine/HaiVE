@@ -20,7 +20,7 @@ list_subdirectories(directory)
 ## agent.md format
 
 Each agent.md contains a single ## Files section listing source files and \
-immediate subdirectories:
+immediate subdirectories with the following format:
 
   filename.ext — one-line description
     Symbol (kind) — start-end
@@ -48,14 +48,18 @@ For the root directory ("."), the path is just the filename, e.g. "cli.py".
 2. Read descriptions of subdirectories listed there; descend only into those \
 relevant to the task using read_agent_md(directory="<subdir>")
 3. Stop exploring once you have found all files relevant to the task.
-4. Prefer focused exploration — do not read agent.md files for directories \
+4. IMPORTANT: Prefer focused exploration — do not read agent.md files for directories \
 whose descriptions are clearly unrelated to the task.
 
-## Token budget
+## Selection scope
 
-Keep your selected sections within {token_budget} tokens total. Prefer \
-symbol-level selections (start_line/end_line) over full-file selections \
-when the relevant part of a file is clearly identifiable.
+Prefer narrow selections over broad ones:
+- If an agent.md symbol entry (e.g. `Task (class) — 12-58`) pinpoints the \
+relevant part of a file, set full=false and use that line range.
+- Only set full=true when the whole file is genuinely needed (e.g. a short \
+config file, or a file whose relevant logic is not captured by any symbol entry).
+- Do not select whole directories worth of files. Pick only the specific \
+files and symbols the task actually needs.
 
 ## Output
 

@@ -66,8 +66,8 @@ _TOOLS: list[dict] = [
 ]
 
 
-def _build_system_prompt(token_budget: int) -> str:
-    return CODE_DISCOVERY_SYSTEM_PROMPT.format(token_budget=token_budget)
+def _build_system_prompt() -> str:
+    return CODE_DISCOVERY_SYSTEM_PROMPT
 
 
 def _build_user_prompt(task: Task) -> str:
@@ -89,7 +89,7 @@ class CodeDiscoveryAgent:
 
     def discover(self, task: Task, root: str, token_budget: int) -> DiscoveryResult:
         messages: list[dict] = [
-            {"role": "system", "content": _build_system_prompt(token_budget)},
+            {"role": "system", "content": _build_system_prompt()},
             {"role": "user", "content": _build_user_prompt(task)},
         ]
         tool_call_count = 0
