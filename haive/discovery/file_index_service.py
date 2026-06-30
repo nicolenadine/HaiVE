@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Iterator
 
 from haive.discovery.agent_md import AgentMdValidator
-from haive.discovery.agent_md_generation_prompt import AGENT_MD_GENERATION_SYSTEM_PROMPT
+from haive.discovery.agent_md_generation_agent import AgentMdGenerationAgent
 from haive.discovery.constants import (
-    AGENT_MD_GENERATION_MAX_TOKENS,
     AGENT_MD_MAX_GENERATION_RETRIES,
     SOURCE_EXTENSIONS,
 )
@@ -22,8 +21,7 @@ class AgentMdGenerationError(Exception):
 
 class FileIndexService:
     def __init__(self, model_client: ModelClient, tier: Tier) -> None:
-        self._client = model_client
-        self._tier = tier
+        self._agent = AgentMdGenerationAgent(model_client, tier)
         self._validator = AgentMdValidator()
 
     def generate_all(self, root: str) -> None:
@@ -70,23 +68,18 @@ class FileIndexService:
         subdirs: list[str],
         root: str,
     ) -> None:
-        prompt = self._build_prompt(dir_path, source_files, subdirs, root)
         violations: list[str] = []
         content = ""
+        prior_violations: list[str] | None = None
 
-        for attempt in range(1, AGENT_MD_MAX_GENERATION_RETRIES + 1):
-            response = self._client.call(
-                tier=self._tier,
-                prompt=prompt,
-                system=AGENT_MD_GENERATION_SYSTEM_PROMPT,
-                max_tokens=AGENT_MD_GENERATION_MAX_TOKENS,
+        for _ in range(AGENT_MD_MAX_GENERATION_RETRIES):
+            content = self._agent.generate(
+                dir_path, source_files, subdirs, root, prior_violations
             )
-            content = response.content.strip()
             violations = self._validator.validate(content)
             if not violations:
                 break
-            if attempt < AGENT_MD_MAX_GENERATION_RETRIES:
-                prompt = self._build_retry_prompt(prompt, violations)
+            prior_violations = violations
 
         if violations:
             rel = os.path.relpath(dir_path, root) if dir_path != root else "."
@@ -98,41 +91,6 @@ class FileIndexService:
 
         Path(os.path.join(dir_path, "agent.md")).write_text(
             content + "\n", encoding="utf-8"
-        )
-
-    def _build_prompt(
-        self,
-        dir_path: str,
-        source_files: list[str],
-        subdirs: list[str],
-        root: str,
-    ) -> str:
-        rel = os.path.relpath(dir_path, root) if dir_path != root else "."
-        parts = [
-            f"Generate an agent.md for the directory: {rel}",
-            "",
-            "Source files in this directory:",
-        ]
-        for f in source_files:
-            parts.append(f"  {f}")
-        if subdirs:
-            parts.append("")
-            parts.append("Immediate subdirectories:")
-            for d in subdirs:
-                parts.append(f"  {d}/")
-        parts.append("")
-        parts.append(
-            "Write the agent.md now. Start directly with '## Files' — no preamble."
-        )
-        return "\n".join(parts)
-
-    def _build_retry_prompt(self, original_prompt: str, violations: list[str]) -> str:
-        violation_lines = "\n".join(f"  - {v}" for v in violations)
-        return (
-            f"{original_prompt}\n\n"
-            f"Your previous response had format violations:\n"
-            f"{violation_lines}\n\n"
-            f"Fix all violations and try again. Start directly with '## Files'."
         )
 
     def _load_gitignore_patterns(self, root: str) -> list[str]:

@@ -5,7 +5,7 @@ import pytest
 
 from haive.discovery.constants import AGENT_MD_MAX_GENERATION_RETRIES
 from haive.discovery.file_index_service import AgentMdGenerationError, FileIndexService
-from haive.llm.model_response import ModelResponse
+from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.tier import Tier
 
 VALID_AGENT_MD = """\
@@ -20,8 +20,16 @@ INVALID_AGENT_MD = (
 )
 
 
-def make_response(content: str) -> ModelResponse:
-    return ModelResponse(content=content, model_used="test-model")
+def make_turn(content: str) -> AgenticTurn:
+    return AgenticTurn(tool_calls=[], content=content, model_used="test-model")
+
+
+def make_tool_turn(name: str, **kwargs) -> AgenticTurn:
+    return AgenticTurn(
+        tool_calls=[ToolCall(id=f"tc_{name}", name=name, arguments=kwargs)],
+        content=None,
+        model_used="test-model",
+    )
 
 
 @pytest.fixture
@@ -45,7 +53,7 @@ class TestGenerateAll:
     def test_generates_agent_md_for_source_directory(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
         (tmp_path / "state.py").write_text("class State: pass")
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
@@ -63,40 +71,41 @@ class TestGenerateAll:
 
         assert not (tmp_path / "agent.md").exists()
         assert not (empty / "agent.md").exists()
-        mock_client.call.assert_not_called()
+        mock_client.call_single.assert_not_called()
 
     def test_retry_on_validation_failure_then_success(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
-        mock_client.call.side_effect = [
-            make_response(INVALID_AGENT_MD),
-            make_response(VALID_AGENT_MD),
+        mock_client.call_single.side_effect = [
+            make_turn(INVALID_AGENT_MD),
+            make_turn(VALID_AGENT_MD),
         ]
 
         service.generate_all(str(tmp_path))
 
-        assert mock_client.call.call_count == 2
+        assert mock_client.call_single.call_count == 2
         assert (tmp_path / "agent.md").exists()
 
-    def test_retry_prompt_includes_violations(self, service, mock_client, tmp_path):
+    def test_retry_message_includes_violations(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
-        mock_client.call.side_effect = [
-            make_response(INVALID_AGENT_MD),
-            make_response(VALID_AGENT_MD),
+        mock_client.call_single.side_effect = [
+            make_turn(INVALID_AGENT_MD),
+            make_turn(VALID_AGENT_MD),
         ]
 
         service.generate_all(str(tmp_path))
 
-        second_call_kwargs = mock_client.call.call_args_list[1].kwargs
-        assert "violations" in second_call_kwargs["prompt"].lower()
+        retry_messages = mock_client.call_single.call_args_list[1].kwargs["messages"]
+        user_msg = next(m for m in retry_messages if m["role"] == "user")
+        assert "violations" in user_msg["content"].lower()
 
     def test_exhausted_retries_raises_generation_error(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
-        mock_client.call.return_value = make_response(INVALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(INVALID_AGENT_MD)
 
         with pytest.raises(AgentMdGenerationError, match="Failed to generate"):
             service.generate_all(str(tmp_path))
 
-        assert mock_client.call.call_count == AGENT_MD_MAX_GENERATION_RETRIES
+        assert mock_client.call_single.call_count == AGENT_MD_MAX_GENERATION_RETRIES
 
     def test_gitignore_excluded_directory_receives_no_agent_md(
         self, service, mock_client, tmp_path
@@ -106,13 +115,13 @@ class TestGenerateAll:
         venv.mkdir()
         (venv / "site.py").write_text("# site-packages stub")
         (tmp_path / "task.py").write_text("class Task: pass")
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
         assert not (venv / "agent.md").exists()
 
-    def test_gitignore_excluded_directory_is_not_passed_to_llm(
+    def test_gitignore_excluded_directory_is_not_listed_in_prompt(
         self, service, mock_client, tmp_path
     ):
         (tmp_path / ".gitignore").write_text("excluded_dir\n")
@@ -120,18 +129,19 @@ class TestGenerateAll:
         excluded.mkdir()
         (excluded / "thing.py").write_text("x = 1")
         (tmp_path / "task.py").write_text("class Task: pass")
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
-        prompt = mock_client.call.call_args.kwargs["prompt"]
-        assert "excluded_dir" not in prompt
+        first_call_messages = mock_client.call_single.call_args_list[0].kwargs["messages"]
+        user_msg = next(m for m in first_call_messages if m["role"] == "user")
+        assert "excluded_dir" not in user_msg["content"]
 
     def test_generates_agent_md_in_subdirectory(self, service, mock_client, tmp_path):
         subdir = tmp_path / "models"
         subdir.mkdir()
         (subdir / "task.py").write_text("class Task: pass")
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
@@ -140,37 +150,36 @@ class TestGenerateAll:
     def test_agent_md_itself_is_not_listed_in_prompt(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
         (tmp_path / "agent.md").write_text(VALID_AGENT_MD)
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
-        prompt = mock_client.call.call_args.kwargs["prompt"]
-        # "agent.md" appears in the boilerplate ("Generate an agent.md for…"),
-        # but must NOT appear as an indented source-file entry.
-        assert "  agent.md" not in prompt
+        first_call_messages = mock_client.call_single.call_args_list[0].kwargs["messages"]
+        user_msg = next(m for m in first_call_messages if m["role"] == "user")
+        assert "  agent.md" not in user_msg["content"]
 
     def test_hidden_files_are_not_listed_in_prompt(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
         (tmp_path / ".hidden.py").write_text("# hidden")
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
-        prompt = mock_client.call.call_args.kwargs["prompt"]
-        assert ".hidden.py" not in prompt
+        first_call_messages = mock_client.call_single.call_args_list[0].kwargs["messages"]
+        user_msg = next(m for m in first_call_messages if m["role"] == "user")
+        assert ".hidden.py" not in user_msg["content"]
 
     def test_non_source_files_do_not_trigger_generation(self, service, mock_client, tmp_path):
-        # A directory with only a .log file should not get an agent.md
         (tmp_path / "output.log").write_text("log entry")
 
         service.generate_all(str(tmp_path))
 
         assert not (tmp_path / "agent.md").exists()
-        mock_client.call.assert_not_called()
+        mock_client.call_single.assert_not_called()
 
     def test_written_content_passes_validator(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
-        mock_client.call.return_value = make_response(VALID_AGENT_MD)
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
 
         service.generate_all(str(tmp_path))
 
@@ -202,7 +211,7 @@ class TestValidateAll:
 
         service.validate_all(str(tmp_path))
 
-        mock_client.call.assert_not_called()
+        mock_client.call_single.assert_not_called()
 
     def test_finds_violations_in_subdirectory(self, service, tmp_path):
         subdir = tmp_path / "models"

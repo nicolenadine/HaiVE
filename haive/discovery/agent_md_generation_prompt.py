@@ -6,10 +6,21 @@ from haive.discovery.constants import (
 )
 
 AGENT_MD_GENERATION_SYSTEM_PROMPT = f"""\
-You are a code-indexing assistant. Your only task is to write a concise, \
+You are a code-indexing assistant. Your task is to write a concise, \
 structured agent.md file describing the contents of a source directory.
 
-Format rules (violations cause automatic retry):
+## Tool
+
+read_file(path)
+  Reads the full content of a source file inside the project repo.
+  Pass the repo-relative path shown in the task (e.g. 'haive/models/task.py').
+  Paths must be relative (no '..' components, no leading '/').
+  Returns the file content as a string.
+
+Read every source file listed in the task before writing the agent.md. \
+Never describe a file or list its symbols without reading it first.
+
+## Format rules (violations cause automatic retry)
 
 ## Files  ← the only permitted section header, exactly this text
 
@@ -32,7 +43,7 @@ Key symbols (optional) — indented directly below their file:
 - At most {AGENT_MD_MAX_SYMBOLS} symbol entries across the whole file.
 
 General rules:
-- No prose paragraphs. No section headers other than ## Files.
+- No prose paragraphs. Your agent.md response must contain only the ## Files section header.
 - Total file must not exceed {AGENT_MD_MAX_LINES} lines.
 - Start your response directly with '## Files'. No preamble, no explanation.
 
