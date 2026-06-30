@@ -82,3 +82,15 @@ class TestOrchestratorSummary:
         summary = registry.get_orchestrator_summary()
         lines = [line for line in summary.strip().splitlines() if line.strip()]
         assert len(lines) == 10
+
+    def test_missing_prompt_file_raises(self, tmp_path):
+        yaml_content = (REGISTRY_PATH.read_text()
+                        .replace("prompts/scaffold_agent.md", "prompts/nonexistent.md"))
+        registry_file = tmp_path / "agents.yaml"
+        registry_file.write_text(yaml_content)
+        # Copy the real prompts dir so only scaffold_agent.md is missing
+        import shutil
+        shutil.copytree(ROOT / "prompts", tmp_path / "prompts")
+        (tmp_path / "prompts" / "scaffold_agent.md").unlink()
+        with pytest.raises(RuntimeError, match="system_prompt file not found"):
+            AgentRegistry.load(str(registry_file))

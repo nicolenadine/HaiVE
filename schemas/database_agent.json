@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "FileEdit": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Repo-relative path of the file to edit.",
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "description": "Complete new content for the file.",
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "title": "FileEdit",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "edits": {
+      "description": "Files to write or overwrite.",
+      "items": {
+        "$ref": "#/$defs/FileEdit"
+      },
+      "title": "Edits",
+      "type": "array"
+    },
+    "notes": {
+      "default": "",
+      "description": "Optional notes for the reviewer.",
+      "title": "Notes",
+      "type": "string"
+    }
+  },
+  "required": [
+    "edits"
+  ],
+  "title": "DatabaseAgentOutput",
+  "type": "object"
+}

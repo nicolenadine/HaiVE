@@ -10,7 +10,7 @@ from haive.llm.tier_config import TierConfig
 from haive.models.orchestrator import OrchestratorInput, OrchestratorOutput
 from haive.orchestration.example_library import ExampleLibrary, format_examples_for_prompt
 from haive.orchestration.example_selector import ExampleSelector
-from haive.orchestration.prompts import build_orchestrator_prompt
+from haive.orchestration.orchestrator_prompt import build_orchestrator_prompt
 
 _ORCHESTRATOR_MAX_OUTPUT_TOKENS = 4096
 

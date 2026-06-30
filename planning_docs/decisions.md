@@ -246,6 +246,18 @@ Format per entry:
 
 ---
 
+### Token budget enforced at section loading, not at discovery
+
+**Decision:** `CodeDiscoveryAgent` outputs sections in order of decreasing relevance (most important first) but does not attempt to enforce a token budget. Token budget enforcement is the responsibility of `FileIndexService.load_sections()`, which processes sections in the order given, accumulates an estimated token count via `TokenCounter.estimate()`, and stops loading once the next section would exceed the budget.
+
+**Alternatives:** Have the discovery agent count tokens before selecting sections; enforce the budget in `ContextAssembler`.
+
+**Rationale:** The discovery agent only reads `agent.md` index files, not the actual source files it is selecting. It therefore has no basis for counting the tokens those source files contain — asking it to enforce a budget would be asking it to guess. Enforcement at `load_sections()` is the first point in the pipeline where actual file content is available and can be measured. `ContextAssembler` is deliberately I/O-free and receives pre-loaded content, so it cannot enforce a budget either. The agent's contribution to budget management is to rank sections by relevance, so that when the loader stops at the budget limit, the dropped sections are the least important ones.
+
+**Tradeoff:** The agent's relevance ordering is LLM-produced and not perfectly reproducible. If the agent misjudges relevance ordering, lower-priority sections may be loaded while higher-priority ones are dropped. Mitigated by the fact that the same model is reading the same structured agent.md summaries each time and the task description is deterministic — ordering tends to be stable for a given task.
+
+---
+
 ### agent.md format validated by a pure-Python structural validator
 
 **Decision:** A deterministic, non-LLM validator checks generated `agent.md` files against a fixed structural format (required section headers, per-file line format, no prose paragraphs, line count limits). It runs automatically after generation (with bounded retries on failure) and is exposed via `haive index --validate` to check existing files without regenerating them.
@@ -255,6 +267,30 @@ Format per entry:
 **Rationale:** Format compliance is a mechanical, checkable property — it doesn't require judgment, so it shouldn't cost an LLM call. A pure-Python validator is fast, deterministic, and catches a small/cheap model's generation mistakes (a likely failure mode for the low-tier model used here) before they degrade discovery quality.
 
 **Tradeoff:** Only catches format violations, not semantic inaccuracies (e.g., a wrong one-line description). The validator's rules must be kept in sync with the format spec as it evolves.
+
+---
+
+### agent.md generation uses tool-calling to read source files, not filenames alone
+
+**Decision:** `AgentMdGenerationAgent` (Step 12) exposes a `read_file` tool and lets the LLM read each source file in full before writing the `agent.md`. File content is never passed as a block in the prompt. The agent reads files on demand via tool calls, then produces the `agent.md` as its final response.
+
+**Alternatives:** Pass filenames only (original implementation — LLM hallucinates symbol names and line numbers); pass full file content as prompt text; use AST extraction for symbols and pass content for descriptions only.
+
+**Rationale:** Passing filenames only causes the LLM to invent class names, method names, and line numbers it has never seen. Passing file content in the prompt works but requires pre-loading everything into the call whether the model needs it or not, and doesn't compose well with the incremental update path. Tool-calling lets the model read exactly what it needs, fits naturally into the `call_single()` pattern already established for `CodeDiscoveryAgent`, and produces accurate symbols and descriptions because the model has seen the actual code. The initial full-repo scan cost is a one-time expense; subsequent updates are per-changed-file only.
+
+**Tradeoff:** More LLM calls per directory (one per file read) versus a single prompt-stuffed call. At low-tier model prices and with incremental updates limiting re-work, this is acceptable. The accuracy gain justifies the additional calls.
+
+---
+
+### Incremental agent.md updates: deletions in code, reads only changed files
+
+**Decision:** `update_after_task` (Step 15) handles the three change types differently: **deletions** are handled entirely in code (parse the existing `agent.md`, strip the deleted file's entry and its symbol sub-entries — no LLM call); **additions and modifications** call `AgentMdGenerationAgent.update()`, which receives the current `agent.md` content and reads only the added/modified files via the `read_file` tool, preserving unchanged entries verbatim. Unchanged files in the same directory are never re-read.
+
+**Alternatives:** Re-generate the entire `agent.md` from scratch for any directory with a changed file (simpler but re-reads all files even if only one changed).
+
+**Rationale:** Full regeneration on any change would re-read every file in a directory whenever any single file is modified — wasteful for large directories and unnecessary since unchanged entries are already correct. Deletions need no model reasoning at all (just text manipulation). Surgical updates keep costs proportional to the amount of code that actually changed, which is the steady-state operation after the one-time initial scan. This also avoids drift: if the agent is asked to regenerate entries it didn't read, it may alter them based on stale assumptions.
+
+**Tradeoff:** The update prompt must instruct the model to preserve unchanged entries exactly, and the validator still checks the whole file after update. If the model accidentally rewrites entries it was told to preserve, the validation retry loop catches format violations but not content drift. Mitigated by explicit prompt instruction and by the fact that unchanged entries are shown in the prompt — the model has them as reference.
 
 ---
 

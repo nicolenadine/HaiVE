@@ -18,6 +18,13 @@ Example output:
   3   Documentation pass
 ```
 
+### add nice formatting and colors to cli interface. 
+
+### add a quick setup wizzard so that all required parameters don't have to be manually set one-by-one using `haive config set` 
+`haive congfig set` is useful for changing one parameter but setting them all is tedious 
+
+### update --help to reflect all functionality of cli 
+
 ---
 
 ### `haive project setup` — Project Setup Wizard
@@ -36,6 +43,25 @@ running haive on a new repo. Walks the user through:
 
 Goal: eliminate the current manual setup step entirely so a new user can go
 from zero to a configured project board in a single command.
+
+---
+
+## Token-Efficient Agent Output (Partial File Edits)
+
+Agent output schemas currently require returning complete file content for every file edited
+(`CodeEditorOutput.edits[].content`). This is reliable but wasteful when only a few lines change.
+
+**Preferred approach when revisiting:** hybrid schema — agent writes `content` (full file) for
+large changes or new files, and `changes: [{search, replace}]` for small targeted edits. The
+agent decides based on change scope; the executor handles both paths.
+
+**Why deferred:** search-and-replace has a serious uniqueness risk in an autonomous context —
+a false match silently corrupts a file with no human to catch it. Full-file rewrites are
+reliable and the token cost (output tokens are ~5x cheaper than input) is manageable at current
+scale. Revisit once the system is running end-to-end and token cost is measurable.
+
+**Scope of change when ready:** `haive/models/agent_output.py` (`FileEdit` model), all editing
+agent prompts (`prompts/`), and the file-writing logic in the Task Executor.
 
 ---
 

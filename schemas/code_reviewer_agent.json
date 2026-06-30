@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "ReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "description": "Repo-relative path of the file containing the finding.",
+          "title": "File",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1-based line number, if applicable.",
+          "title": "Line"
+        },
+        "severity": {
+          "description": "One of: critical, major, minor, nitpick.",
+          "title": "Severity",
+          "type": "string"
+        },
+        "message": {
+          "description": "Description of the finding.",
+          "title": "Message",
+          "type": "string"
+        },
+        "suggestion": {
+          "default": "",
+          "description": "Suggested fix or improvement.",
+          "title": "Suggestion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "severity",
+        "message"
+      ],
+      "title": "ReviewFinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "passed": {
+      "description": "True if the submission meets the acceptance criteria.",
+      "title": "Passed",
+      "type": "boolean"
+    },
+    "uncertain": {
+      "default": false,
+      "description": "True when the reviewer cannot determine correctness. Mutually exclusive with passed=True.",
+      "title": "Uncertain",
+      "type": "boolean"
+    },
+    "findings": {
+      "description": "Issues found. Empty when passed=True.",
+      "items": {
+        "$ref": "#/$defs/ReviewFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "summary": {
+      "description": "One-paragraph summary of the review.",
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "passed",
+    "summary"
+  ],
+  "title": "CodeReviewerOutput",
+  "type": "object"
+}
