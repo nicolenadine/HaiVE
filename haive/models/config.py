@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # Observability
     phoenix_otlp_endpoint: str = "http://localhost:6006/v1/traces"
 
+    # Runtime flags
+    dry_run: bool = False
+
     # Providers
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
