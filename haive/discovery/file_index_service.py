@@ -13,6 +13,8 @@ from haive.discovery.constants import (
 )
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
+from haive.llm.token_counter import TokenCounter
+from haive.models.discovery import DiscoveryResult, LoadedSection
 
 
 class AgentMdGenerationError(Exception):
@@ -35,6 +37,46 @@ class FileIndexService:
         dirs = list(self._walk_source_dirs(root, patterns))
         for dir_path, source_files, subdirs in reversed(dirs):
             self._generate_for_dir(dir_path, source_files, subdirs, root)
+
+    def load_sections(
+        self, result: DiscoveryResult, root: str, token_budget: int
+    ) -> list[LoadedSection]:
+        """Load source content for each discovered section, most-relevant-first.
+
+        Sections are processed in the order provided by DiscoveryResult (which
+        CodeDiscoveryAgent lists most-relevant-first). Loading stops when the
+        next section would push the accumulated token count over token_budget;
+        all remaining sections are dropped silently.
+
+        Raises FileNotFoundError with a descriptive message if a discovered
+        file does not exist on disk.
+        """
+        loaded: list[LoadedSection] = []
+        tokens_used = 0
+
+        for section in result.sections:
+            full_path = Path(root) / section.file
+            if not full_path.is_file():
+                raise FileNotFoundError(
+                    f"Discovered file no longer exists: {section.file!r}"
+                )
+
+            text = full_path.read_text(encoding="utf-8")
+
+            if section.full or (section.start_line is None or section.end_line is None):
+                source = text
+            else:
+                lines = text.splitlines(keepends=True)
+                source = "".join(lines[section.start_line - 1 : section.end_line])
+
+            cost = TokenCounter.estimate(source)
+            if tokens_used + cost > token_budget:
+                break
+
+            loaded.append(LoadedSection(file=section.file, source=source, reason=section.reason))
+            tokens_used += cost
+
+        return loaded
 
     def validate_all(self, root: str) -> dict[str, list[str]]:
         """Return {relative_path: [violations]} for every agent.md found under root.

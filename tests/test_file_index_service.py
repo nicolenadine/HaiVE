@@ -261,3 +261,68 @@ class TestGitignoreHandling:
 
     def test_non_matching_directory_not_skipped(self, service):
         assert service._should_skip("haive", [".venv"]) is False
+
+
+# ── load_sections ─────────────────────────────────────────────────────────────
+
+from haive.models.discovery import DiscoveredSection, DiscoveryResult
+
+
+def _section(file: str, *, full: bool = True, start: int | None = None, end: int | None = None, reason: str = "relevant") -> DiscoveredSection:
+    return DiscoveredSection(file=file, symbol=None, start_line=start, end_line=end, full=full, reason=reason)
+
+
+def _result(*sections: DiscoveredSection) -> DiscoveryResult:
+    return DiscoveryResult(sections=list(sections), status="found")
+
+
+class TestLoadSections:
+    def test_full_section_returns_entire_file(self, service, tmp_path):
+        (tmp_path / "task.py").write_text("line1\nline2\nline3\n")
+        result = _result(_section("task.py", full=True))
+        loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
+        assert len(loaded) == 1
+        assert loaded[0].source == "line1\nline2\nline3\n"
+        assert loaded[0].file == "task.py"
+        assert loaded[0].reason == "relevant"
+
+    def test_line_range_returns_exact_slice(self, service, tmp_path):
+        (tmp_path / "task.py").write_text("a\nb\nc\nd\ne\n")
+        result = _result(_section("task.py", full=False, start=2, end=4))
+        loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
+        assert loaded[0].source == "b\nc\nd\n"
+
+    def test_missing_file_raises_file_not_found(self, service, tmp_path):
+        result = _result(_section("ghost.py", full=True))
+        with pytest.raises(FileNotFoundError, match="ghost.py"):
+            service.load_sections(result, str(tmp_path), token_budget=10000)
+
+    def test_sections_dropped_when_budget_exceeded(self, service, tmp_path):
+        # Each file is ~100 chars → ~25 tokens. Budget of 30 fits only the first.
+        content = "x" * 100
+        (tmp_path / "a.py").write_text(content)
+        (tmp_path / "b.py").write_text(content)
+        result = _result(
+            _section("a.py", full=True, reason="first"),
+            _section("b.py", full=True, reason="second"),
+        )
+        loaded = service.load_sections(result, str(tmp_path), token_budget=30)
+        assert len(loaded) == 1
+        assert loaded[0].reason == "first"
+
+    def test_priority_order_preserved(self, service, tmp_path):
+        (tmp_path / "a.py").write_text("a")
+        (tmp_path / "b.py").write_text("b")
+        (tmp_path / "c.py").write_text("c")
+        result = _result(
+            _section("a.py", full=True, reason="most relevant"),
+            _section("b.py", full=True, reason="second"),
+            _section("c.py", full=True, reason="third"),
+        )
+        loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
+        assert [s.reason for s in loaded] == ["most relevant", "second", "third"]
+
+    def test_empty_discovery_result_returns_empty_list(self, service, tmp_path):
+        result = DiscoveryResult(sections=[], status="empty")
+        loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
+        assert loaded == []
