@@ -19,6 +19,9 @@ class ModelClient:
             os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
         if settings.openai_api_key:
             os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+        # Disable LiteLLM's async logging worker — we use synchronous calls only
+        # and the worker produces RuntimeWarnings about destroyed tasks on exit.
+        litellm.callbacks = []
 
     def call(self, tier: Tier, prompt: str, system: str, max_tokens: int) -> ModelResponse:
         primary = tier.models[0]
