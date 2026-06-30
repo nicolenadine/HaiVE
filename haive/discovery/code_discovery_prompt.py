@@ -49,8 +49,10 @@ For the root directory ("."), the path is just the filename, e.g. "cli.py".
 2. Read descriptions of subdirectories listed there; descend only into those \
 relevant to the task using read_agent_md(directory="<subdir>")
 3. Stop exploring once you have found all files relevant to the task.
-4. IMPORTANT: Prefer focused exploration — do not read agent.md files for directories \
-whose descriptions are clearly unrelated to the task.
+4. Prefer focused exploration — do not read agent.md files for directories \
+whose descriptions are clearly unrelated to the task. However, when multiple \
+subdirectories could plausibly contain relevant code, navigate all of them \
+rather than picking only one.
 
 ## Selection scope and priority
 
