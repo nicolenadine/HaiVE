@@ -20,11 +20,11 @@ Each step in this plan represents one milestone of work: focused, independently 
 | 8 | Persistence | Agent Registry Loader |
 | 9 | Model Routing | LiteLLM Tier Configuration |
 | 10 | Orchestration | Orchestrator |
-| 11 | RepoMap | DuckDB Schema Initialization |
-| 12 | RepoMap | File Parser and `scan_repo()` |
-| 13 | RepoMap | Dependency Graph and Ranking |
-| 14 | RepoMap | `get_context_pack()` |
-| 15 | RepoMap | `update_files()` and Incremental Refresh |
+| 11 | Discovery | agent.md Format Spec and Validator |
+| 12 | Discovery | FileIndexService — agent.md Generation (`haive index`) |
+| 13 | Discovery | Code Discovery Agent |
+| 14 | Discovery | FileIndexService — Section Loading |
+| 15 | Discovery | FileIndexService — Post-Task Regeneration |
 | 16 | Execution | Context Assembler |
 | 17 | Execution | Agent Output Schemas and Output Validator |
 | 18 | Execution | Agent System Prompts |
@@ -44,7 +44,7 @@ Each step in this plan represents one milestone of work: focused, independently 
 **Goal:** A runnable, installable Python package with no agent logic yet.
 
 **Scope**
-- `pyproject.toml` — package metadata, all dependencies declared (`litellm`, `pydantic`, `pydantic-settings`, `typer`, `pytest`, `duckdb`, `tree-sitter`, `opentelemetry-sdk`, `openinference-instrumentation-litellm`, `arize-phoenix`, `PyGithub`, `filelock`)
+- `pyproject.toml` — package metadata, all dependencies declared (`litellm`, `pydantic`, `pydantic-settings`, `typer`, `pytest`, `opentelemetry-sdk`, `openinference-instrumentation-litellm`, `arize-phoenix`, `PyGithub`, `filelock`)
 - `haive/__init__.py` — package root
 - `haive/cli.py` — Typer app with a placeholder `run` command
 - `tests/__init__.py` and `tests/conftest.py`
@@ -299,7 +299,7 @@ Each step in this plan represents one milestone of work: focused, independently 
 - `haive/llm/tier_config.py` — `TierConfig` built from `Settings`; maps `Complexity` → `Tier`
 - `haive/llm/token_counter.py` — `TokenCounter` class
   - `estimate(text: str) -> int` — `math.ceil(len(text) / 4)` — model-agnostic, no external dependencies
-  - Used by `get_context_pack` (Step 14) and `ContextAssembler` (Step 16) to enforce token budgets
+  - Used by `CodeDiscoveryAgent.discover` (Step 13), `FileIndexService.load_sections` (Step 14), and `ContextAssembler` (Step 16) to enforce token budgets
 - Unit tests: mock `litellm.completion`, verify correct model list passed, verify fallback on first model failure, verify `APIError` is not swallowed
 
 **Success Criteria**
@@ -357,137 +357,130 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 ---
 
-## Phase 6: RepoMapService
+## Phase 6: Code Discovery & Indexing
 
-### Step 11 — DuckDB Schema Initialization
+> **Note:** Steps 11–15 were originally implemented as a DuckDB + tree-sitter dependency graph with PageRank-style ranking (`haive/repomap/db.py`, `graph.py`, `repo_map_service.py`, `language_parser.py`). That implementation is retired in favor of the agentic Code Discovery Agent + `agent.md` index design below — see `planning_docs/decisions.md` ("Agentic Code Discovery Agent replaces the structural repo graph" and related entries) for the rationale. When this phase is (re)implemented, the `haive/repomap/` module and its tests should be removed.
 
-**Goal:** Initialize and version-check the DuckDB backing store for the repo map.
+### Step 11 — agent.md Format Spec and Validator
+
+**Goal:** Define the structural format for per-directory `agent.md` index files and a pure-Python validator that checks generated files against that format.
 
 **Scope**
-- `haive/repomap/db.py` — `RepoMapDB` class
-  - `initialize(db_path: str) -> RepoMapDB` — creates file or opens existing
-  - Schema creation: `files`, `symbols`, `references`, `edges` tables (exact columns from architecture doc)
-  - Schema version table: store `schema_version` string; if existing version doesn't match, trigger full rebuild
-  - All DDL is idempotent (`CREATE TABLE IF NOT EXISTS`)
-- Unit tests:
-  - Fresh init creates all tables
-  - Re-init on existing DB does not drop tables
-  - Schema version mismatch is detected
+- `planning_docs/agent_md_spec.md` — exact format: required section headers (e.g. `## Files` listing `path — one-line description`; optional `## Key Symbols` listing `name (kind) — start-end`), per-line format rules, no prose paragraphs, a maximum line count
+- `haive/discovery/agent_md.py` — `AgentMdValidator` class
+  - `validate(content: str) -> list[str]` — returns a list of violation messages; an empty list means valid
+  - Checks: required section headers present, each file/symbol entry matches the expected line format, no line resembling a prose paragraph (vs. a recognized list-item pattern), total line count within the configured limit
+- Unit tests: a correctly formatted `agent.md` returns no violations; a missing required section is flagged; a prose paragraph is flagged; an oversized file is flagged
 
 **Success Criteria**
-- [ ] `RepoMapDB.initialize(":memory:")` creates all four tables
-- [ ] Calling `initialize` twice does not error or drop data
-- [ ] Schema version check: mismatched version is detected and flagged (full rebuild deferred to Step 12)
-- [ ] SQL columns match the schema in the architecture doc exactly
+- [ ] A correctly formatted `agent.md` returns no violations
+- [ ] A missing `## Files` section is flagged with a specific message
+- [ ] A prose paragraph is flagged as a violation
+- [ ] `AgentMdValidator` has no LLM dependency — pure string/regex logic, fully deterministic
 
-**Deferred:** No parsing or data population yet.
+**Deferred:** Generation logic (Step 12).
 
 ---
 
-### Step 12 — File Parser and `scan_repo()`
+### Step 12 — FileIndexService: agent.md Generation (`haive index`)
 
-**Goal:** Parse a Python codebase into the DuckDB schema using tree-sitter.
+**Goal:** Generate per-directory `agent.md` files for the whole repo using a low-tier LLM that reads actual source files via tool calling, validated against the Step 11 spec.
 
 **Scope**
-- `haive/repomap/language_parser.py` — `LanguageParser` protocol + `PythonParser`:
-  - `LanguageParser` protocol: `extensions: list[str]` + `parse_file(path: str, content: str) -> ParsedFile`
-  - `PythonParser`: `extensions = [".py"]`; uses `tree-sitter` with the Python grammar; extracts symbols (functions, classes, methods) and references (calls, imports); computes `content_hash` (SHA256); records `parser_version` and `extractor_version`
-- `haive/repomap/repo_map_service.py` — `RepoMapService` class (partial)
-  - `scan_repo(root: str, parsers: list[LanguageParser] = [PythonParser()]) -> None` — walks all files, dispatches to the parser whose `extensions` matches each file's extension, inserts into DuckDB; skips files matching `.gitignore` patterns or in `__pycache__`; warns at startup if no registered parser matches any file in the repo
-- v1 scope: Python only. All files with non-`.py` extensions are ignored. Adding a new language = new `LanguageParser` implementation, no changes to `RepoMapService`.
-- Unit tests using a small fixture directory with 3–5 Python files:
-  - Symbol extraction: functions, classes, and methods are found
-  - Reference extraction: function calls and imports are recorded
-  - Content hash is stable for the same file
-  - `scan_repo` populates all four tables
-  - No `.py` files in repo → warning emitted, no crash
+- `haive/discovery/agent_md_generation_agent.py` — `AgentMdGenerationAgent` class (parallel to `CodeDiscoveryAgent`)
+  - `generate(dir_path: str, source_files: list[str], subdirs: list[str], root: str) -> str` — full generation for a directory. Exposes a single tool `read_file(path: str) -> str` (same `_resolve_within_root` security boundary as `CodeDiscoveryAgent`). The agent reads every source file in the directory before writing the `agent.md`. The tool-calling loop terminates naturally once the agent has read the files it needs and produces a final text response containing the `agent.md` content.
+  - Model tier: low tier
+- `haive/discovery/file_index_service.py` — `FileIndexService` class
+  - `generate_all(root: str) -> None` — walks the repo respecting `.gitignore` (`.git` is the only hardcoded exclusion, everything else comes from `.gitignore`); for each directory containing at least one source file, delegates to `AgentMdGenerationAgent.generate()`, validates the draft via `AgentMdValidator`, retries (bounded) on violation, then writes the file
+  - Model tier: routed through the existing named-config tier system, defaulting to the lowest tier
+- `haive/cli.py` — `haive index` command: calls `generate_all()`
+- `haive/cli.py` — `haive index --validate` flag: runs `AgentMdValidator` against all existing `agent.md` files without regenerating, prints any violations found
+- Unit tests (mocked LLM): generation produces a valid `agent.md` for a fixture directory; a validation failure triggers one retry that then succeeds; exhausted retries raise a clear error; `.gitignore`-excluded directories produce no `agent.md`
 
 **Success Criteria**
-- [ ] Given a file with one class and two methods, `PythonParser.parse_file` returns all three symbols
-- [ ] Import statements are captured as references
-- [ ] `scan_repo` on the fixture directory inserts rows into `files`, `symbols`, and `references`
-- [ ] Running `scan_repo` twice on an unchanged repo does not create duplicate rows
-- [ ] A non-`.py` file is skipped without error
-- [ ] A repo with no `.py` files triggers a startup warning (not a crash)
-- [ ] `LanguageParser` is a protocol — `PythonParser` satisfies it without inheriting from any base class
+- [ ] `haive index` generates one `agent.md` per source directory in a fixture repo
+- [ ] Generated `agent.md` files pass `AgentMdValidator` with zero violations
+- [ ] A mocked LLM response that fails validation triggers a retry, succeeding on the second attempt
+- [ ] `.gitignore`-excluded directories produce no `agent.md`
+- [ ] `haive index --validate` reports violations in existing files without calling the LLM
 
-**Deferred:** Graph and ranking logic; `edges` table population. TypeScript and other language parsers are future work.
+**Deferred:** Post-task incremental regeneration (Step 15); discovery/consumption of `agent.md` files (Step 13).
 
 ---
 
-### Step 13 — Dependency Graph and Ranking
+### Step 13 — Code Discovery Agent
 
-**Goal:** Build the file dependency graph and rank files by relevance to a task description.
+**Goal:** An agentic, tool-calling LLM agent that navigates the `agent.md` tree to find task-relevant files and sections, under strict guardrails.
 
 **Scope**
-- `haive/repomap/graph.py` — `GraphBuilder` and `Ranker` classes
-  - `build_edges(db: RepoMapDB) -> None` — populate `edges` from `references` → `symbols` join
-  - `rank_files(db: RepoMapDB, query: str, top_k: int) -> list[RankedFile]` — PageRank-style score over `edges`, optionally combined with keyword/BM25 match on `query`
-  - `RankedFile` dataclass: `path`, `score`, `reason`
-- Unit tests using the fixture directory from Step 12:
-  - After `build_edges`, the `edges` table has rows for files that import from each other
-  - `rank_files` returns the file containing the queried symbol at or near the top
-  - `rank_files` respects `top_k`
+- `haive/models/discovery.py` — `DiscoveredSection` (`file: str`, `symbol: str | None`, `start_line: int | None`, `end_line: int | None`, `full: bool`, `reason: str`); `DiscoveryResult` (`sections: list[DiscoveredSection]`, `status: Literal["found", "empty"]`)
+- `haive/discovery/code_discovery_agent.py` — `CodeDiscoveryAgent` class
+  - `discover(task: Task, root: str, token_budget: int) -> DiscoveryResult`
+  - Tools exposed to the agent: `read_agent_md(directory: str) -> str`, `list_subdirectories(directory: str) -> list[str]`
+  - System prompt enforces guardrails: max exploration depth, max tool-call count, must list sections in order of decreasing relevance (most important first), must return output matching `DiscoveryResult`; token budget is not enforced here — the agent cannot count tokens of content it has not loaded
+  - Starts at the repo root's `agent.md`; descends into a subdirectory only when its parent's `agent.md` suggests relevance
+  - Model tier: low tier (same routing as Step 12)
+- Unit tests (mocked LLM/tool calls): given a two-level fixture tree, the agent finds the directly relevant file without reading unrelated sibling subdirectories; a guardrail test where the agent attempts to exceed max depth/call count is cut off and returns its best-effort result rather than erroring; a no-match case returns `status="empty"`
 
 **Success Criteria**
-- [ ] If file A imports a symbol from file B, an edge from A → B exists in `edges`
-- [ ] `rank_files(query="UserRegistrationHandler")` returns the file defining that class in the top result
-- [ ] Unrelated files score lower than files containing referenced symbols
-- [ ] `build_edges` is idempotent
+- [ ] Given a task naming a feature present in only one subdirectory, discovery returns that subdirectory's file(s) without reading sibling subdirectories' `agent.md` files
+- [ ] Exceeding the configured max tool-call count stops exploration and returns the best result so far, not an error
+- [ ] No relevant files found → `DiscoveryResult(sections=[], status="empty")`, not an exception
+- [ ] Output is validated against `DiscoveryResult` via the existing `OutputValidator` pattern
 
-**Deferred:** Token-budget enforcement deferred to `get_context_pack`.
+**Deferred:** Section loading and slicing (Step 14).
 
 ---
 
-### Step 14 — `get_context_pack()`
+### Step 14 — FileIndexService: Section Loading
 
-**Goal:** Assemble a token-budget-constrained context pack for a given task.
+**Goal:** Turn a `DiscoveryResult` into actual loaded source content, ready for the (I/O-free) Context Assembler.
 
 **Scope**
-- `haive/models/context.py` — `ContextPack`, `RelevantSymbol`, `RelevantFile`, `BrokenReference`
-- `RepoMapService.get_context_pack(task: Task, token_budget: int) -> ContextPack`
-  - Rank files via `Ranker`
-  - Extract `RelevantSymbol` entries (AST-extracted source snippets from tree-sitter)
-  - Collect `BrokenReference` entries (references where `resolved_symbol_id IS NULL`)
-  - Collect `impacted_files` (files that reference the ranked symbols)
-  - Estimate token count; trim `relevant_symbols` from the bottom until within budget
-  - Return `ContextPack` with `token_estimate`
-- Unit tests:
-  - Context pack respects `token_budget`
-  - `broken_references` is populated when a symbol reference is unresolved
-  - `impacted_files` lists files that import from the ranked files
+- `haive/models/discovery.py` addition — `LoadedSection` (`file: str`, `source: str`, `reason: str`)
+- `FileIndexService.load_sections(result: DiscoveryResult, root: str, token_budget: int) -> list[LoadedSection]`
+  - Processes `result.sections` in the order returned by `CodeDiscoveryAgent` (which lists them most-relevant-first)
+  - For each section: load content (`full=True` → whole file; `start_line`/`end_line` → `lines[start_line - 1 : end_line]`), estimate its token cost via `TokenCounter.estimate()`, and accumulate. Stop loading when adding the next section would exceed `token_budget`; sections after the cutoff are silently dropped
+  - This is the only file-content read in the discovery pipeline; `ContextAssembler` (Step 16) receives `list[LoadedSection]` and performs no I/O itself
+- Unit tests: a `full=True` section returns the entire file content; a `start_line`/`end_line` section returns exactly that range; a discovery entry pointing at a file that no longer exists raises a descriptive error rather than silently skipping; sections exceeding the token budget are dropped in priority order (last sections dropped first)
 
 **Success Criteria**
-- [ ] Context pack with a 500-token budget does not exceed 500 tokens (by estimate)
-- [ ] `broken_references` contains an entry when a function is called but not defined
-- [ ] `token_estimate` is populated on every returned pack
-- [ ] Symbols are trimmed lowest-ranked first when over budget
+- [ ] `full=True` returns the complete file content
+- [ ] A `start_line`/`end_line` section returns exactly those lines, no more
+- [ ] A discovery entry pointing at a missing file raises a descriptive error
+- [ ] Sections are loaded in the order given by `DiscoveryResult.sections`; loading stops when `token_budget` would be exceeded
 
-**Deferred:** Integration with Context Assembler deferred to Step 16.
+**Deferred:** Regeneration trigger (Step 15).
 
 ---
 
-### Step 15 — `update_files()` and Incremental Refresh
+### Step 15 — FileIndexService: Post-Task Regeneration
 
-**Goal:** Refresh only changed files after an agent edit, using git as the source of truth.
+**Goal:** Keep `agent.md` files in sync after each task by reading only the files that actually changed — not re-reading the whole directory.
 
 **Scope**
-- `RepoMapService.update_files(paths: list[str]) -> None`
-  - For each path: read current content hash; if unchanged, skip; if changed, re-parse, remove old symbols/references for that file, insert new ones, rebuild edges for that file
-  - After update, flag dependent files for broken reference check
-- `haive/repomap/git_utils.py`
-  - `get_changed_files(repo_root: str) -> list[str]` — runs `git diff --name-only` and `git status --porcelain`
-- Unit tests:
-  - Modifying a file in the fixture causes only that file to be re-parsed
-  - An unchanged file is skipped (hash match → no re-parse)
-  - Deleting a symbol in a file marks references to it as broken
+- `AgentMdGenerationAgent.update(dir_path: str, changed_files: list[str], existing_content: str, root: str) -> str` — incremental update mode (new method on the class from Step 12). Receives the current `agent.md` content and the subset of files that were added or modified. The agent reads only those files via `read_file`, then returns the complete updated `agent.md` with changed entries rewritten and unchanged entries preserved verbatim.
+- `FileIndexService.update_after_task(changed_files: list[str], root: str) -> None`
+  - Called by the Task Executor after a task's changes are committed, using git output as the source of truth (`get_changed_files`) — not agent self-reporting
+  - Groups changed files by their containing directory
+  - For each affected directory:
+    - **Deleted files**: handled in code — parse the existing `agent.md`, strip the entry for each deleted file and its symbol sub-entries. No LLM call required.
+    - **Added or modified files**: call `AgentMdGenerationAgent.update()` with the existing agent.md content and only the added/modified files. The agent reads those files and rewrites only their entries.
+    - If the directory has no existing `agent.md` (newly created directory), falls back to `AgentMdGenerationAgent.generate()` (full generation).
+  - Parent directory updates: if a file addition creates a new source directory, or a deletion removes the last source file from a directory, the parent directory's `agent.md` is also updated (to add or remove the subdirectory entry).
+  - Each updated `agent.md` goes through the same validate → retry path as `generate_all`
+- `haive/discovery/git_utils.py` — `get_changed_files(repo_root: str) -> list[str]` — runs `git diff --name-only` and `git status --porcelain`
+- Unit tests: modifying a file updates only its directory's `agent.md`; only the modified file's entry is rewritten (unchanged entries are preserved); adding a new file updates the directory listing; deleting a file removes its entry without touching others; a brand-new directory triggers full generation
 
 **Success Criteria**
-- [ ] `update_files(["a.py"])` re-parses `a.py` and skips `b.py` (unchanged)
-- [ ] After a symbol is removed, `broken_references` includes the stale reference
-- [ ] `get_changed_files` returns the correct list from `git diff` output (tested with a subprocess mock)
+- [ ] Editing a file in `dir/` updates `dir/agent.md` only — no other `agent.md` files are touched
+- [ ] Only the entry for the modified file is rewritten; all other entries remain verbatim
+- [ ] Adding a new file appends its entry without re-reading unchanged files
+- [ ] Deleting a file removes its entry (and symbol sub-entries) without an LLM call
+- [ ] A newly created directory triggers full generation via `AgentMdGenerationAgent.generate()`
+- [ ] `get_changed_files` is driven by git output, not agent-reported file lists
 
-**Deferred:** Medium refresh deferred to Step 23 (called before each orchestrator loop via `get_changed_files` + `update_files`). Full refresh (branch switch, parser upgrade, cache corruption) is not in v1 scope.
+**Deferred:** None — this closes the loop opened in Step 12. No startup scan is ever performed; `haive run` only reads existing `agent.md` files (see Step 23).
 
 ---
 
@@ -499,20 +492,21 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 **Scope**
 - `haive/execution/context_assembler.py` — `ContextAssembler` class
-  - `assemble(task: Task, context_pack: ContextPack, agent_config: AgentConfig, dependency_outputs: dict[str, str], retry_feedback: list[str] | None) -> str`
-  - Assembly order: system prompt → task description + acceptance criteria → relevant symbols → impacted files → dependency outputs → reviewer feedback (if retry)
-  - No service calls — receives all data as parameters
-  - Token budget passed to `get_context_pack` earlier; this step formats what was returned
+  - `assemble(task: Task, loaded_sections: list[LoadedSection], discovery_status: Literal["found", "empty_expected", "empty_unexpected"], agent_config: AgentConfig, dependency_outputs: dict[str, str], retry_feedback: list[str] | None) -> str`
+  - Assembly order: system prompt → task description + acceptance criteria → discovered sections (or, when `loaded_sections` is empty, an explicit "no existing relevant code was found for this task" note) → dependency outputs → reviewer feedback (if retry)
+  - No service calls and no file I/O — receives all data as parameters; `FileIndexService` (Steps 13–14) has already done any file reading
+  - Token budget is enforced upstream by `CodeDiscoveryAgent`/`FileIndexService`; this step formats what was returned
 - Unit tests:
   - Retry feedback appears in the prompt when provided
   - Dependency outputs are included in correct order
   - System prompt content is present
-  - Impacted files are listed (not fully included)
+  - Empty `loaded_sections` produces the explicit "no relevant code found" note instead of a blank section
 
 **Success Criteria**
 - [ ] A prompt assembled for a retry includes the reviewer's suggestions
 - [ ] A prompt for a first attempt has no feedback section
 - [ ] Dependency outputs from `depends_on` tasks appear in the prompt
+- [ ] An empty discovery result produces the explicit no-context note in the prompt
 - [ ] The assembled string contains all required sections in the documented order
 
 **Deferred:** No LLM call here — just prompt construction.
@@ -587,8 +581,9 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 **Scope**
 - `haive/execution/review_agent.py` — `ReviewAgent` class
-  - `review(task: Task, agent_output: BaseModel, context_pack: ContextPack) -> ReviewVerdict`
-  - Builds the review prompt: task description, acceptance criteria, agent output, broken references from context pack, guidelines
+  - `review(task: Task, agent_output: BaseModel, loaded_sections: list[LoadedSection], discovery_status: Literal["found", "empty_expected", "empty_unexpected"], discovery_note: str) -> ReviewVerdict`
+  - Builds the review prompt: task description, acceptance criteria, agent output, the discovered sections the task agent was given, `discovery_status`/`discovery_note`, guidelines
+  - When `discovery_status="empty_unexpected"`, the prompt explicitly flags this for extra scrutiny — the agent output may assume context it never received
   - Calls `ModelClient` with the current reviewer model (advances through `REVIEWER_MODELS` on `uncertain`)
   - Validates response against `ReviewAgentOutput` schema
   - Returns `ReviewVerdict` with `passed`, `reason`, `suggestions`, `uncertain`
@@ -600,7 +595,8 @@ Each step in this plan represents one milestone of work: focused, independently 
   - Failing output returns `ReviewVerdict(passed=False, reason=..., suggestions=[...], uncertain=False)`
   - Uncertain output returns `ReviewVerdict(uncertain=True)` → executor advances reviewer model
   - All reviewer models return `uncertain` → defaults to `passed=False`
-  - Broken references are included in the review context
+  - `discovery_status="empty_unexpected"` is present in the review prompt
+  - `discovery_status="empty_expected"` (e.g. a scaffold task) does not trigger the extra-scrutiny note
   - `suggestions` is never empty when `passed=False` and `uncertain=False`
 
 **Success Criteria**
@@ -608,6 +604,7 @@ Each step in this plan represents one milestone of work: focused, independently 
 - [ ] `ReviewVerdict.suggestions` is non-empty when `passed=False` and `uncertain=False`
 - [ ] `uncertain=True` with `passed=True` raises a validation error
 - [ ] `VerdictSummary` is correctly derived from `ReviewVerdict` (no suggestions leaked)
+- [ ] `discovery_status="empty_unexpected"` is included in the review prompt as an explicit signal for extra scrutiny
 - [ ] Reviewer model advancement on `uncertain` is tested without real LLM calls
 - [ ] Tests use mocked LLM — no real model calls
 
@@ -619,16 +616,18 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 **Scope**
 - `haive/execution/task_executor.py` — `TaskExecutor` class
-  - `run(task: Task, project_state: ProjectState, repo_map: RepoMapService, registry: AgentRegistry, pm: PMAdapter, vcs: VCSAdapter, settings: Settings) -> TaskExecutionRecord`
+  - `run(task: Task, project_state: ProjectState, discovery_agent: CodeDiscoveryAgent, file_index: FileIndexService, registry: AgentRegistry, pm: PMAdapter, vcs: VCSAdapter, settings: Settings) -> TaskExecutionRecord`
   - Implements the full retry/escalation loop:
     - `VCSAdapter.create_branch(f"haive/task-{task.task_id}", base=project_branch)`
     - `PMAdapter.update_status(task.task_id, IN_PROGRESS)`
-    - Get context pack from `RepoMapService.get_context_pack(task, token_budget)`
-    - Assemble prompt via `ContextAssembler` (task description + acceptance criteria + dependency summaries + context pack)
+    - Call `discovery_agent.discover(task, root, token_budget)` → `DiscoveryResult`
+    - Determine `discovery_status`: `"found"` if sections were returned; otherwise `"empty_expected"` if `task.agent_role` is a scaffold-type role, else `"empty_unexpected"`
+    - Call `file_index.load_sections(result, root)` → `list[LoadedSection]`
+    - Assemble prompt via `ContextAssembler` (task description + acceptance criteria + dependency summaries + loaded sections + discovery_status)
     - Call `ModelClient` for current tier
     - Validate output via `OutputValidator` (schema fail → retry or escalate; no Review Agent call)
-    - Review output via `ReviewAgent`
-    - On pass: apply file changes to disk, commit, `VCSAdapter.create_pr(...)`, `VCSAdapter.add_pr_comment(...)`, `VCSAdapter.merge_pr(pr_id)`, `PMAdapter.update_status(COMPLETE)`, call `update_files`, write `TaskExecutionRecord` to state
+    - Review output via `ReviewAgent`, passing `loaded_sections`, `discovery_status`, and a short `discovery_note`
+    - On pass: apply file changes to disk, commit, `VCSAdapter.create_pr(...)`, `VCSAdapter.add_pr_comment(...)`, `VCSAdapter.merge_pr(pr_id)`, `PMAdapter.update_status(COMPLETE)`, call `file_index.update_after_task(get_changed_files(root), root)`, write `TaskExecutionRecord` to state
     - On fail: increment attempt; escalate tier when attempts exhausted
     - On tier ladder exhausted: `PMAdapter.add_comment(task.task_id, attempt_summary)`, `PMAdapter.update_status(NEEDS_HUMAN_REVIEW)`, write `TaskExecutionRecord` to state
   - Handles the three failure modes distinctly (API error, bad output, tier exhausted)
@@ -639,7 +638,9 @@ Each step in this plan represents one milestone of work: focused, independently 
   - Tier escalation: medium tier exhausted, escalates to high tier with feedback
   - All tiers exhausted: comment written with full attempt log, task marked needs-human-review
   - Schema failure does not invoke Review Agent
-  - `changed_files` from `git diff`, not agent self-report
+  - Empty discovery on a non-scaffold task produces `discovery_status="empty_unexpected"`, passed through to the Review Agent
+  - Empty discovery on a scaffold task produces `discovery_status="empty_expected"`
+  - `changed_files` from `git diff`, not agent self-report; passed to `file_index.update_after_task` on success
 
 **Success Criteria**
 - [ ] A task that passes produces a `TaskExecutionRecord` with `verdict.passed=True` and a valid `pr_id`
@@ -648,6 +649,7 @@ Each step in this plan represents one milestone of work: focused, independently 
 - [ ] API errors do not consume a retry budget
 - [ ] On retries exhausted: PM comment contains the full attempt log; task status is `needs-human-review`
 - [ ] `changed_files` is populated from `git diff --name-only`, not from agent self-report
+- [ ] On success, `file_index.update_after_task` is called with the git-derived `changed_files`
 - [ ] Ambiguous `FileEdit` (duplicate `old_string`) raises `AmbiguousEditError`
 
 **Deferred:** Parallel execution deferred to Task Scheduler.
@@ -727,12 +729,14 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 **Scope**
 - `haive/cli.py` — `haive run --project <id>` command (replace the placeholder from Step 1)
+- `haive/cli.py` — `haive index` and `haive index --validate` commands (carried over from Step 12; documented here as part of the full CLI surface)
+- Startup preflight check added to `haive run`: if the repo root has no `agent.md` files, exit with a clear error instructing the user to run `haive index` first. `haive run` never generates or regenerates `agent.md` files itself — generation happens only via `haive index` (initial) and `FileIndexService.update_after_task` (post-task); there is no startup scan (see `planning_docs/decisions.md`)
 - Run sequence (one invocation = one wave):
   1. Load `Settings`
   2. `setup_observability(settings)`
   3. Load `AgentRegistry`
   4. Initialize `PMAdapter` and `VCSAdapter` from `Settings.pm_adapter` / `Settings.vcs_adapter`
-  5. Initialize `RepoMapService`; call `scan_repo()`
+  5. Initialize `FileIndexService` and `CodeDiscoveryAgent`; run the `agent.md`-exists preflight check described above (no scan)
   6. `StateStore.load_or_init(project_id)` → `ProjectState`
   7. `PMAdapter.get_project(project_id)` → `Project`
   8. `PMAdapter.get_tasks(project_id)` → `list[Task]`
@@ -756,7 +760,8 @@ Each step in this plan represents one milestone of work: focused, independently 
 - [ ] Startup errors (bad config, invalid registry, schema version mismatch) exit with a clear message and non-zero status code
 - [ ] Task completions (and `needs-human-review` events) print to terminal in real time
 - [ ] On `done=True`: project branch → main PR is created and URL is printed
-- [ ] `haive --help` documents `--project` and `--dry-run` flags
+- [ ] `haive run` exits with a clear error if no `agent.md` files exist at the repo root, instructing the user to run `haive index` — it does not generate them itself
+- [ ] `haive --help` documents `--project`, `--dry-run`, `haive index`, and `haive index --validate`
 
 **Deferred:** No additional CLI subcommands.
 
@@ -801,13 +806,13 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 ```
 Steps 1-9 (Foundation)
-    ├── Step 10 (Orchestrator) ← needs Steps 5,7,8,9; independent of RepoMap chain
+    ├── Step 10 (Orchestrator) ← needs Steps 5,7,8,9; independent of Discovery chain
     │
-    ├── Step 11 (DuckDB Schema)
-    │     └── Step 12 (Parser + scan_repo)
-    │           └── Step 13 (Graph + Ranking)
-    │                 └── Step 14 (get_context_pack)
-    │                       └── Step 15 (update_files)
+    ├── Step 11 (agent.md Spec + Validator)
+    │     └── Step 12 (FileIndexService: generate_all / haive index)
+    │           └── Step 13 (Code Discovery Agent)
+    │                 └── Step 14 (FileIndexService: load_sections)
+    │                       └── Step 15 (FileIndexService: update_after_task)
     │
     └── Steps 16-20 (Execution Pipeline) ← needs Steps 9,14,15 + Steps 6,7,8,17,18,19
           └── Step 21 (Task Scheduler) ← needs Steps 7,20

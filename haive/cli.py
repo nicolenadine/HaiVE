@@ -1,4 +1,5 @@
 import shutil
+import time
 from datetime import datetime, timezone
 
 import typer
@@ -141,6 +142,130 @@ def _print_dry_run_output(project, output) -> None:
                 typer.echo(f"       - {ac}")
         if task.recovery_for:
             typer.echo(f"     Recovery for: #{task.recovery_for}")
+        typer.echo()
+
+
+# ── Index command ─────────────────────────────────────────────────────────────
+
+@app.command("index")
+def index(
+    validate: bool = typer.Option(
+        False,
+        "--validate",
+        is_flag=True,
+        help="Validate existing agent.md files without regenerating them.",
+    ),
+) -> None:
+    """Generate (or validate) per-directory agent.md index files."""
+    import os
+
+    _preflight_checks()
+    root = os.getcwd()
+
+    from haive.discovery.file_index_service import AgentMdGenerationError, FileIndexService
+    from haive.llm.model_client import ModelClient
+    from haive.llm.tier_config import TierConfig
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    tier_config = TierConfig.from_settings(settings)
+    model_client = ModelClient(settings)
+    service = FileIndexService(model_client, tier_config.low)
+
+    if validate:
+        violations = service.validate_all(root)
+        if not violations:
+            typer.echo("All agent.md files are valid.")
+            return
+        for path, messages in sorted(violations.items()):
+            typer.echo(f"\n{path}:")
+            for msg in messages:
+                typer.echo(f"  - {msg}")
+        typer.echo(
+            f"\n{len(violations)} file(s) have violations.", err=True
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Indexing {root} ...")
+    start = time.perf_counter()
+    try:
+        service.generate_all(root)
+    except AgentMdGenerationError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+    elapsed = time.perf_counter() - start
+    typer.echo(f"Done. agent.md files written in {elapsed:.1f}s.")
+
+
+# ── Discover command ──────────────────────────────────────────────────────────
+
+@app.command("discover")
+def discover(
+    description: str = typer.Argument(..., help="What the task needs to accomplish."),
+    title: str = typer.Option("", "--title", help="Short task title (defaults to first 60 chars of description)."),
+    budget: int = typer.Option(16000, "--budget", help="Token budget hint passed to the discovery agent."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", is_flag=True, help="Print raw LLM response before parsing."),
+) -> None:
+    """Run the Code Discovery Agent against the current repo's agent.md tree."""
+    import os
+    import types
+
+    _preflight_checks()
+    root = os.getcwd()
+
+    from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
+    from haive.llm.model_client import ModelClient
+    from haive.llm.tier_config import TierConfig
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    task_title = title or description[:60]
+    task = types.SimpleNamespace(title=task_title, description=description)
+
+    tier_config = TierConfig.from_settings(settings)
+    agent = CodeDiscoveryAgent(ModelClient(settings), tier_config.low)
+
+    if verbose:
+        original_parse = agent._parse_result
+        def _verbose_parse(content: str):
+            typer.echo("\n── raw LLM response ──────────────────────────────────")
+            typer.echo(content)
+            typer.echo("──────────────────────────────────────────────────────\n")
+            return original_parse(content)
+        agent._parse_result = _verbose_parse  # type: ignore[method-assign]
+
+    typer.echo(f'Discovering for: "{task_title}"\n')
+    start = time.perf_counter()
+    result = agent.discover(task, root, budget)
+    elapsed = time.perf_counter() - start
+
+    typer.echo(f"Status: {result.status}  ({elapsed:.1f}s)\n")
+
+    if not result.sections:
+        typer.echo("No relevant sections found.")
+        return
+
+    typer.echo(f"Sections ({len(result.sections)}, most relevant first):\n")
+    for i, s in enumerate(result.sections, 1):
+        location = s.file
+        if s.symbol:
+            location += f"  ·  {s.symbol}"
+        if s.start_line and s.end_line:
+            location += f" — {s.start_line}-{s.end_line}"
+        elif s.full:
+            location += "  ·  full file"
+        typer.echo(f"  {i}. {location}")
+        typer.echo(f"     {s.reason}")
         typer.echo()
 
 

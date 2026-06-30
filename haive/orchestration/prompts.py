@@ -1,6 +1,6 @@
 # Orchestrator prompt v1
 
-def build_orchestrator_system_prompt(
+def build_orchestrator_prompt(
     max_recovery_depth: int,
     planning_examples: str | None = None,
 ) -> str:
