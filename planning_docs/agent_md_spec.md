@@ -18,15 +18,15 @@ Every `agent.md` file must contain **exactly** the following section header:
 ## Files
 ```
 
-The `## Key Symbols` section is optional.
-
 No other top-level section headers (`## ...`) are permitted. `###` or deeper subheadings are not permitted at all.
 
 ---
 
 ## Section: `## Files`
 
-Lists every source file in the directory, one entry per line, in the format:
+Lists every source file and immediate subdirectory, one entry per line. Key symbols within a file are listed as indented sub-entries directly below that file's entry.
+
+### File entries
 
 ```
 path — one-line description
@@ -36,16 +36,36 @@ Rules:
 - `path` is the filename only (no directory prefix), e.g. `task.py`, not `haive/models/task.py`.
 - The separator is ` — ` (space, em dash `—`, space). An ASCII hyphen (`-`) is not valid.
 - The description is a single sentence fragment, all on one line, with no trailing period.
-- The description must be between 5 and 120 characters.
-- Subdirectory entries list the subdirectory name followed by `/`, e.g. `models/ — Pydantic data models for tasks, state, and verdicts`.
+- The description must be between 5 and 150 characters.
+- Subdirectory entries list the subdirectory name followed by `/`, e.g. `models/`.
 - Only source files and immediate subdirectories are listed. Generated files, compiled artifacts, and `__pycache__` are excluded.
 - The `agent.md` file itself is not listed.
+
+### Symbol sub-entries
+
+Key symbols (classes, functions, methods, or constants) defined in a file may be listed as sub-entries directly below that file's line, indented with **exactly two spaces**:
+
+```
+  name (kind) — start-end
+```
+
+Rules:
+- Symbol entries are indented with exactly 2 spaces. No other indentation is valid.
+- `name` is the symbol name as it appears in source, e.g. `TaskExecutor`, `load_or_init`.
+- `kind` is one of: `class`, `function`, `method`, `constant`.
+- `start-end` are 1-based line numbers, e.g. `42-88`. Both numbers are required; they must be integers with `start <= end`.
+- Symbol entries must follow a file entry, not a subdirectory entry.
+- Subdirectory entries do not have symbol sub-entries.
+- At most 50 symbol sub-entries across the entire `agent.md`.
 
 **Valid examples:**
 
 ```
 task.py — Task and Project domain models with dependency tracking
+  Task (class) — 12-58
+  Project (class) — 61-90
 state.py — ProjectState schema and schema-version guard
+  ProjectState (class) — 14-45
 models/ — Pydantic data models for tasks, state, and verdicts
 ```
 
@@ -54,50 +74,19 @@ models/ — Pydantic data models for tasks, state, and verdicts
 ```
 task.py - Task and Project domain models     ← ASCII hyphen, not em dash
 haive/models/task.py — ...                   ← full path, not filename
-task.py — Task and Project domain models.    ← trailing period
-task.py — Models.                            ← description too short and has a period
-```
-
----
-
-## Section: `## Key Symbols` (optional)
-
-Lists notable symbols (functions, classes, constants) defined in the directory's files, one entry per line, in the format:
-
-```
-name (kind) — start-end
-```
-
-Rules:
-- `name` is the symbol name as it appears in source, e.g. `TaskExecutor`, `load_or_init`.
-- `kind` is one of: `class`, `function`, `method`, `constant`.
-- `start-end` are 1-based line numbers, e.g. `42-88`. Both numbers are required; they must be integers with `start <= end`.
-- The separator between the symbol spec and the line range is ` — ` (same as in `## Files`).
-- At most 30 symbol entries per `agent.md`.
-
-**Valid examples:**
-
-```
-TaskExecutor (class) — 12-110
-run (method) — 45-88
-load_or_init (function) — 14-32
-MAX_RETRIES (constant) — 8-8
-```
-
-**Invalid examples:**
-
-```
-TaskExecutor — 12-110        ← missing (kind)
-run (method) - 45-88         ← ASCII hyphen separator
-run (method) — 45            ← missing end line
-run (method) — 88-45         ← start > end
+task.py — Models.                            ← trailing period
+Task (class) — 12-58                         ← symbol entry missing 2-space indent
+  Task — 12-58                               ← symbol entry missing (kind)
+  Task (class) - 12-58                       ← ASCII hyphen in symbol entry
+  Task (class) — 88-12                       ← start > end
+  Task (module) — 1-50                       ← unknown kind
 ```
 
 ---
 
 ## Line Count Limit
 
-An `agent.md` file must not exceed **150 lines** in total (including blank lines, section headers, and all entries).
+An `agent.md` file must not exceed **200 lines** in total (including blank lines, section headers, file entries, and symbol sub-entries).
 
 ---
 
@@ -105,23 +94,10 @@ An `agent.md` file must not exceed **150 lines** in total (including blank lines
 
 No prose paragraphs are permitted. A line is considered prose if it:
 - Contains 10 or more words, AND
-- Does not match the `## Files` entry pattern (`path — description`), AND
-- Does not match the `## Key Symbols` entry pattern (`name (kind) — start-end`), AND
+- Does not match the file entry pattern (`path — description`), AND
+- Does not match the symbol sub-entry pattern (`  name (kind) — start-end`), AND
 - Is not a section header (`## ...`), AND
 - Is not blank.
-
-Prose in an `agent.md` is a format violation. `AgentMdValidator` flags it as such.
-
----
-
-## Blank Lines and Spacing
-
-- Exactly one blank line between the section header and the first entry.
-- Exactly one blank line between the last entry of one section and the next section header.
-- No trailing blank lines at the end of the file.
-- No consecutive blank lines.
-
-Blank-line spacing violations are **not** checked by `AgentMdValidator` in v1 — the validator focuses on structural correctness, not stylistic whitespace.
 
 ---
 
@@ -131,16 +107,14 @@ Blank-line spacing violations are **not** checked by `AgentMdValidator` in v1 �
 ## Files
 
 task.py — Task and Project domain models with dependency tracking
+  Task (class) — 12-58
+  Project (class) — 61-90
 state.py — ProjectState schema and schema-version guard
+  ProjectState (class) — 14-45
 verdict.py — ReviewVerdict and VerdictSummary definitions
 enums.py — TaskStatus, AgentRole, and Complexity enumerations
-
-## Key Symbols
-
-Task (class) — 12-58
-Project (class) — 61-90
-ProjectState (class) — 14-45
-TaskStatus (constant) — 5-5
+  TaskStatus (constant) — 5-5
+models/ — Pydantic data models for tasks, state, and verdicts
 ```
 
 ---
@@ -155,14 +129,14 @@ Violations detected:
 |---|---|
 | `## Files` section missing | `"Missing required section: ## Files"` |
 | Unknown section header `## Foo` | `"Unknown section header: ## Foo"` |
-| `## Files` entry does not match `path — description` | `"Files entry has wrong format: <line>"` |
+| File entry does not match `path — description` | `"Files entry has wrong format: <line>"` |
 | Description shorter than 5 characters | `"Files entry description too short: <line>"` |
-| Description longer than 120 characters | `"Files entry description too long: <line>"` |
-| `## Key Symbols` entry does not match `name (kind) — start-end` | `"Key Symbols entry has wrong format: <line>"` |
-| Kind not in allowed set | `"Key Symbols entry has unknown kind '<kind>': <line>"` |
-| `start > end` in line range | `"Key Symbols entry has invalid line range: <line>"` |
-| More than 30 symbol entries | `"Key Symbols section exceeds 30-entry limit"` |
+| Description longer than 150 characters | `"Files entry description too long: <line>"` |
+| Symbol sub-entry does not match `  name (kind) — start-end` | `"Symbol entry has wrong format: <line>"` |
+| Kind not in allowed set | `"Symbol entry has unknown kind '<kind>': <line>"` |
+| `start > end` in line range | `"Symbol entry has invalid line range: <line>"` |
+| More than 50 symbol sub-entries | `"Symbol entries exceed 50-entry limit"` |
 | Prose paragraph detected | `"Prose paragraph detected: <line>"` |
-| Total line count exceeds 150 | `"File exceeds 150-line limit (<n> lines)"` |
+| Total line count exceeds 200 | `"File exceeds 200-line limit (<n> lines)"` |
 
 Validation is applied in the order above; all violations are collected and returned together (not short-circuited after the first).
