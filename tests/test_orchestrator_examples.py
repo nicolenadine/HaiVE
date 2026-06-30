@@ -10,7 +10,7 @@ from haive.orchestration.example_library import (
     format_examples_for_prompt,
 )
 from haive.orchestration.example_selector import ExampleSelector, classify_tags, score_example
-from haive.orchestration.prompts import build_orchestrator_prompt
+from haive.orchestration.orchestrator_prompt import build_orchestrator_prompt
 
 
 # ---------------------------------------------------------------------------
