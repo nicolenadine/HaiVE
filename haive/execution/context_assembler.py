@@ -2,21 +2,20 @@ from __future__ import annotations
 
 from typing import Literal
 
-from haive.models.config import AgentConfig
 from haive.models.discovery import LoadedSection
 from haive.models.task import Task
 
 
 class ContextAssembler:
-    """Assembles the final agent prompt from pre-loaded context pieces.
+    """Assembles the user-facing context prompt from pre-loaded context pieces.
 
     No I/O or service calls — all file content has already been loaded by
-    FileIndexService. Assembly order:
-      1. System prompt (from AgentConfig)
-      2. Task description and acceptance criteria
-      3. Discovered source sections (or an explicit no-context note)
-      4. Dependency outputs
-      5. Retry feedback (only on retries)
+    FileIndexService. The system prompt is handled by the caller and passed
+    separately to ModelClient.call(). Assembly order:
+      1. Task description and acceptance criteria
+      2. Discovered source sections (or an explicit no-context note)
+      3. Dependency outputs
+      4. Retry feedback (only on retries)
     """
 
     def assemble(
@@ -24,13 +23,10 @@ class ContextAssembler:
         task: Task,
         loaded_sections: list[LoadedSection],
         discovery_status: Literal["found", "empty_expected", "empty_unexpected"],
-        agent_config: AgentConfig,
         dependency_outputs: dict[str, str],
         retry_feedback: list[str] | None = None,
     ) -> str:
         parts: list[str] = []
-
-        parts.append(agent_config.system_prompt.strip())
 
         parts.append(self._task_section(task))
 

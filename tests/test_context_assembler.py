@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from haive.execution.context_assembler import ContextAssembler
-from haive.models.config import AgentConfig
 from haive.models.discovery import LoadedSection
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.task import Task
@@ -25,20 +24,6 @@ def make_task(**kwargs) -> Task:
     return Task(**(defaults | kwargs))
 
 
-def make_agent_config(**kwargs) -> AgentConfig:
-    defaults = dict(
-        role=AgentRole.IMPLEMENTATION_AGENT,
-        description="Writes implementation code.",
-        skills=["python"],
-        system_prompt="You are an implementation agent. Write clean, tested code.",
-        output_schema="CodeEditorOutput",
-        max_tokens=4096,
-        retry_limit=2,
-        prompt_version="v1",
-    )
-    return AgentConfig(**(defaults | kwargs))
-
-
 def make_section(file: str, source: str, reason: str = "Relevant to task.") -> LoadedSection:
     return LoadedSection(file=file, source=source, reason=reason)
 
@@ -46,40 +31,21 @@ def make_section(file: str, source: str, reason: str = "Relevant to task.") -> L
 # ── section order ─────────────────────────────────────────────────────────────
 
 class TestAssemblyOrder:
-    def test_system_prompt_appears_first(self):
-        assembler = ContextAssembler()
-        config = make_agent_config(system_prompt="SYSTEM PROMPT SENTINEL")
-        result = assembler.assemble(
-            task=make_task(),
-            loaded_sections=[],
-            discovery_status="empty_expected",
-            agent_config=config,
-            dependency_outputs={},
-        )
-        assert result.startswith("SYSTEM PROMPT SENTINEL")
-
-    def test_task_section_follows_system_prompt(self):
-        assembler = ContextAssembler()
-        config = make_agent_config(system_prompt="SYS")
-        result = assembler.assemble(
+    def test_task_section_is_first(self):
+        result = ContextAssembler().assemble(
             task=make_task(title="My Task"),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=config,
             dependency_outputs={},
         )
-        sys_pos = result.index("SYS")
-        task_pos = result.index("My Task")
-        assert sys_pos < task_pos
+        assert result.startswith("## Task")
 
     def test_context_follows_task(self):
-        assembler = ContextAssembler()
         section = make_section("haive/client.py", "class Client: pass")
-        result = assembler.assemble(
+        result = ContextAssembler().assemble(
             task=make_task(title="My Task"),
             loaded_sections=[section],
             discovery_status="found",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         task_pos = result.index("My Task")
@@ -87,13 +53,11 @@ class TestAssemblyOrder:
         assert task_pos < code_pos
 
     def test_dependency_outputs_follow_context(self):
-        assembler = ContextAssembler()
         section = make_section("haive/client.py", "class Client: pass")
-        result = assembler.assemble(
+        result = ContextAssembler().assemble(
             task=make_task(),
             loaded_sections=[section],
             discovery_status="found",
-            agent_config=make_agent_config(),
             dependency_outputs={"10": "output from task 10"},
         )
         code_pos = result.index("haive/client.py")
@@ -101,12 +65,10 @@ class TestAssemblyOrder:
         assert code_pos < dep_pos
 
     def test_retry_feedback_appears_last(self):
-        assembler = ContextAssembler()
-        result = assembler.assemble(
+        result = ContextAssembler().assemble(
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={"10": "dep output"},
             retry_feedback=["fix the type error"],
         )
@@ -123,7 +85,6 @@ class TestTaskSection:
             task=make_task(title="Add retry", description="Use exponential backoff."),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "Add retry" in result
@@ -134,7 +95,6 @@ class TestTaskSection:
             task=make_task(acceptance_criteria=["must pass tests", "no regressions"]),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "must pass tests" in result
@@ -145,7 +105,6 @@ class TestTaskSection:
             task=make_task(acceptance_criteria=[]),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "Acceptance criteria" not in result
@@ -163,7 +122,6 @@ class TestContextSection:
             task=make_task(),
             loaded_sections=sections,
             discovery_status="found",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "haive/client.py" in result
@@ -180,7 +138,6 @@ class TestContextSection:
             task=make_task(),
             loaded_sections=sections,
             discovery_status="found",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert result.index("first.py") < result.index("second.py")
@@ -190,7 +147,6 @@ class TestContextSection:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "creating new code from scratch" in result
@@ -200,7 +156,6 @@ class TestContextSection:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_unexpected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "Proceed based on the task description alone" in result
@@ -210,7 +165,6 @@ class TestContextSection:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "```" not in result
@@ -224,7 +178,6 @@ class TestDependencyOutputs:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={"5": "Task 5 produced an API client."},
         )
         assert "Task 5 produced an API client." in result
@@ -234,7 +187,6 @@ class TestDependencyOutputs:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={"3": "output three", "7": "output seven"},
         )
         assert "output three" in result
@@ -245,7 +197,6 @@ class TestDependencyOutputs:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
         )
         assert "Dependency Outputs" not in result
@@ -259,7 +210,6 @@ class TestRetryFeedback:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
             retry_feedback=["fix the import error", "add type annotations"],
         )
@@ -271,7 +221,6 @@ class TestRetryFeedback:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
             retry_feedback=None,
         )
@@ -282,7 +231,6 @@ class TestRetryFeedback:
             task=make_task(),
             loaded_sections=[],
             discovery_status="empty_expected",
-            agent_config=make_agent_config(),
             dependency_outputs={},
             retry_feedback=[],
         )
