@@ -24,6 +24,12 @@ AGENT_MD_MAX_GENERATION_RETRIES = 3
 # 200 lines * ~10 tokens/line gives ~2 000 tokens; 2 048 provides headroom.
 AGENT_MD_GENERATION_MAX_TOKENS = 2048
 
+# Code Discovery Agent guardrails.
+# Maximum total tool invocations per discover() call before the agent is forced to emit results.
+CODE_DISCOVERY_MAX_TOOL_CALLS = 20
+# max_tokens for each call_single() in the discovery loop (covers JSON output).
+CODE_DISCOVERY_MAX_TOKENS = 4096
+
 # File extensions treated as source files when walking the repo.
 # Directories that contain no file matching this set are skipped.
 SOURCE_EXTENSIONS: frozenset[str] = frozenset(
