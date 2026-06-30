@@ -22,13 +22,14 @@ list_subdirectories(directory)
 Each agent.md contains a single ## Files section listing source files and \
 immediate subdirectories with the following format:
 
-  filename.ext — one-line description
-    Symbol (kind) — start-end
+filename.ext — one-line description
+  Symbol (kind) — start-end — description
 
-  subdir/ — one-line description
+subdir/ — one-line description
 
 - File entries are unindented: `filename — description`
-- Symbol sub-entries are indented with exactly 2 spaces: `  Name (kind) — start-end`
+- Symbol sub-entries are indented with exactly 2 spaces: \
+  `  Name (kind) — start-end — description` \
   where kind is class, function, method, or constant, and start-end are 1-based line numbers
 - Subdirectory entries end with `/`
 
@@ -70,23 +71,23 @@ files and symbols the task actually needs.
 When you have finished exploring, emit a single JSON object (no markdown \
 code fences, no explanation) in this exact schema:
 
-{{
+{
   "sections": [
-    {{
+    {
       "file": "<full repo-relative path>",
       "symbol": "<symbol name or null>",
       "start_line": <integer or null>,
       "end_line": <integer or null>,
       "full": <true or false>,
       "reason": "<one sentence explaining relevance>"
-    }}
+    }
   ],
   "status": "found"
-}}
+}
 
 If you find nothing relevant, emit:
 
-{{"sections": [], "status": "empty"}}
+{"sections": [], "status": "empty"}
 
 Do not add any text before or after the JSON object.
 """

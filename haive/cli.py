@@ -209,6 +209,7 @@ def discover(
     description: str = typer.Argument(..., help="What the task needs to accomplish."),
     title: str = typer.Option("", "--title", help="Short task title (defaults to first 60 chars of description)."),
     budget: int = typer.Option(16000, "--budget", help="Token budget hint passed to the discovery agent."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", is_flag=True, help="Print raw LLM response before parsing."),
 ) -> None:
     """Run the Code Discovery Agent against the current repo's agent.md tree."""
     import os
@@ -233,6 +234,15 @@ def discover(
 
     tier_config = TierConfig.from_settings(settings)
     agent = CodeDiscoveryAgent(ModelClient(settings), tier_config.low)
+
+    if verbose:
+        original_parse = agent._parse_result
+        def _verbose_parse(content: str):
+            typer.echo("\n── raw LLM response ──────────────────────────────────")
+            typer.echo(content)
+            typer.echo("──────────────────────────────────────────────────────\n")
+            return original_parse(content)
+        agent._parse_result = _verbose_parse  # type: ignore[method-assign]
 
     typer.echo(f'Discovering for: "{task_title}"\n')
     start = time.perf_counter()
