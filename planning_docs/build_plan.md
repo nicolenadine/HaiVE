@@ -802,6 +802,30 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 ---
 
+## Hardening Backlog
+
+Known reliability gaps to address before or during Phase 11 integration testing.
+
+### H1 — agent.md symbol line number correction
+
+**Problem:** `AgentMdGenerationAgent` asks the LLM to count line numbers, but LLMs
+estimate rather than parse. On files longer than ~200 lines, the assigned `start-end`
+range for later symbols can be off by 50–150 lines. Observed: `run` in `haive/cli.py`
+assigned range 234–301 when it actually starts at line 347.
+
+**Impact:** `FileIndexService.load_sections()` cuts the wrong slice, loading an
+unrelated function rather than the intended one.
+
+**Fix:** After `AgentMdGenerationAgent.generate()` (and `.update()`) writes each
+agent.md, parse the symbol entries, open the corresponding source file, and verify
+each symbol's start line by searching for the function/class definition. Correct any
+line that is off. This is a deterministic post-processing pass — no extra LLM call.
+
+**Scope:** `FileIndexService._generate_for_dir()` and `_update_for_dir()` — after
+content passes `AgentMdValidator`, run a symbol line corrector before writing to disk.
+
+---
+
 ## Dependency Order Summary
 
 ```

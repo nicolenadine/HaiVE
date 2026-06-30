@@ -18,6 +18,13 @@ Example output:
   3   Documentation pass
 ```
 
+### add nice formatting and colors to cli interface. 
+
+### add a quick setup wizzard so that all required parameters don't have to be manually set one-by-one using `haive config set` 
+`haive congfig set` is useful for changing one parameter but setting them all is tedious 
+
+### update --help to reflect all functionality of cli 
+
 ---
 
 ### `haive project setup` — Project Setup Wizard

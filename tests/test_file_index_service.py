@@ -326,3 +326,113 @@ class TestLoadSections:
         result = DiscoveryResult(sections=[], status="empty")
         loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
         assert loaded == []
+
+
+# ── _remove_deleted_entries ───────────────────────────────────────────────────
+
+class TestRemoveDeletedEntries:
+    def test_removes_file_entry_and_its_symbols(self):
+        content = (
+            "## Files\n\n"
+            "task.py — Task model\n"
+            "  Task (class) — 1-50 — Pydantic task model\n"
+            "  run (method) — 52-60 — Runs the task\n"
+            "state.py — State model\n"
+        )
+        result = FileIndexService._remove_deleted_entries(content, {"task.py"})
+        assert "task.py" not in result
+        assert "Task (class)" not in result
+        assert "run (method)" not in result
+        assert "state.py — State model" in result
+
+    def test_preserves_other_entries_intact(self):
+        content = (
+            "## Files\n\n"
+            "a.py — A model\n"
+            "b.py — B model\n"
+            "  B (class) — 1-10 — B class\n"
+            "c.py — C model\n"
+        )
+        result = FileIndexService._remove_deleted_entries(content, {"b.py"})
+        assert "a.py — A model" in result
+        assert "c.py — C model" in result
+        assert "b.py" not in result
+        assert "B (class)" not in result
+
+    def test_no_deleted_files_returns_content_unchanged(self):
+        content = "## Files\n\ntask.py — Task model\n"
+        result = FileIndexService._remove_deleted_entries(content, set())
+        assert result == content
+
+    def test_deleting_nonexistent_entry_is_a_noop(self):
+        content = "## Files\n\ntask.py — Task model\n"
+        result = FileIndexService._remove_deleted_entries(content, {"ghost.py"})
+        assert result == content
+
+
+# ── update_after_task ─────────────────────────────────────────────────────────
+
+class TestUpdateAfterTask:
+    def test_modified_file_calls_agent_update(self, tmp_path):
+        mock_client = MagicMock()
+        mock_client.call_single.return_value = make_turn(
+            "## Files\n\ntask.py — Updated task model\nstate.py — State model"
+        )
+        service = FileIndexService(mock_client, MagicMock(spec=Tier))
+
+        (tmp_path / "task.py").write_text("class Task: pass\n")
+        (tmp_path / "state.py").write_text("class State: pass\n")
+        (tmp_path / "agent.md").write_text(
+            "## Files\n\ntask.py — Old task model\nstate.py — State model\n"
+        )
+
+        service.update_after_task(["task.py"], str(tmp_path))
+
+        mock_client.call_single.assert_called()
+        written = (tmp_path / "agent.md").read_text()
+        assert "Updated task model" in written
+        assert "state.py — State model" in written
+
+    def test_deleted_file_strips_entry_without_llm(self, tmp_path):
+        mock_client = MagicMock()
+        service = FileIndexService(mock_client, MagicMock(spec=Tier))
+
+        (tmp_path / "state.py").write_text("class State: pass\n")
+        (tmp_path / "agent.md").write_text(
+            "## Files\n\ntask.py — Task model\n  Task (class) — 1-10 — Task\nstate.py — State model\n"
+        )
+
+        # task.py is listed but does not exist on disk → treated as deleted
+        service.update_after_task(["task.py"], str(tmp_path))
+
+        mock_client.call_single.assert_not_called()
+        written = (tmp_path / "agent.md").read_text()
+        assert "task.py" not in written
+        assert "Task (class)" not in written
+        assert "state.py — State model" in written
+
+    def test_new_directory_triggers_full_generation(self, tmp_path):
+        mock_client = MagicMock()
+        mock_client.call_single.return_value = make_turn(
+            "## Files\n\nnew_file.py — New module"
+        )
+        service = FileIndexService(mock_client, MagicMock(spec=Tier))
+
+        new_dir = tmp_path / "newmod"
+        new_dir.mkdir()
+        (new_dir / "new_file.py").write_text("# new\n")
+        # No agent.md in new_dir — should fall back to generate()
+
+        service.update_after_task(["newmod/new_file.py"], str(tmp_path))
+
+        mock_client.call_single.assert_called()
+        assert (new_dir / "agent.md").exists()
+
+    def test_non_source_files_are_ignored(self, tmp_path):
+        mock_client = MagicMock()
+        service = FileIndexService(mock_client, MagicMock(spec=Tier))
+        (tmp_path / "agent.md").write_text("## Files\n\ntask.py — Task model\n")
+
+        service.update_after_task(["README.md", ".env", "agent.md"], str(tmp_path))
+
+        mock_client.call_single.assert_not_called()
