@@ -29,22 +29,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     # Low tier
-    tier_low_models: list[str]
+    tier_low_models: list[str] = Field(default=["anthropic/claude-haiku-4-5-20251001"])
     tier_low_max_attempts: int = 2
     tier_low_context_budget: int = 8000
 
     # Medium tier
-    tier_medium_models: list[str]
+    tier_medium_models: list[str] = Field(default=["anthropic/claude-sonnet-4-6"])
     tier_medium_max_attempts: int = 2
     tier_medium_context_budget: int = 16000
 
     # High tier
-    tier_high_models: list[str]
+    tier_high_models: list[str] = Field(default=["anthropic/claude-opus-4-8"])
     tier_high_max_attempts: int = 2
     tier_high_context_budget: int = 32000
 
     # Review agent
-    reviewer_models: list[str]
+    reviewer_models: list[str] = Field(default=["anthropic/claude-sonnet-4-6"])
 
     # Recovery
     max_recovery_depth: int = 3
