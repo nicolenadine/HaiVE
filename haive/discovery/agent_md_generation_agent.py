@@ -69,6 +69,7 @@ def _build_user_prompt(
         "For subdirectories, read their agent.md to write an accurate one-line description "
         "of what that subdirectory contains. "
         "If a subdirectory has no agent.md, write a brief description based on its name. "
+        "Do not list agent.md as a file entry — it is never included in the output. "
         "Start your response directly with '## Files' — no preamble."
     )
     if prior_violations:
