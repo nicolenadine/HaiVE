@@ -28,9 +28,6 @@ class Settings(BaseSettings):
     # TODO : revert hard coded values back to env
     model_config = SettingsConfigDict(extra="ignore")
 
-    # Orchestrator
-    orchestrator_model: str
-
     # Low tier
     tier_low_models: list[str]
     tier_low_max_attempts: int = 2
