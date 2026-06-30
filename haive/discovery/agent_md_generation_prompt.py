@@ -39,9 +39,8 @@ Key symbols (optional) — indented directly below their file:
 - Exactly 2 leading spaces. No other indentation is valid.
 - kind is one of: class, function, method, constant
 - start-end are 1-based line numbers (both required; start ≤ end).
-- description is a concise phrase describing what the symbol does (required \
-for functions and methods; optional for classes and constants whose names \
-are self-explanatory).
+- description is a concise phrase describing what the symbol does. \
+Required for all symbol entries.
 - Only list symbols for file entries, not subdirectory entries.
 - At most {AGENT_MD_MAX_SYMBOLS} symbol entries across the whole file.
 
@@ -55,14 +54,14 @@ Example of a correctly formatted agent.md:
 ## Files
 
 task.py — Task and Project domain models with dependency tracking
-  Task (class) — 12-58
-  Project (class) — 61-90
+  Task (class) — 12-58 — Pydantic model representing a unit of work
+  Project (class) — 61-90 — Top-level container grouping tasks under a milestone
   task_from_dict (function) — 93-108 — Constructs a Task from a raw JSON dict
 state.py — ProjectState schema and schema-version guard
-  ProjectState (class) — 14-45
+  ProjectState (class) — 14-45 — Serialisable snapshot of task completion state
   load_state (function) — 48-61 — Reads and validates state.json from disk
 verdict.py — ReviewVerdict and VerdictSummary definitions
 enums.py — TaskStatus, AgentRole, and Complexity enumerations
-  TaskStatus (constant) — 5-5
+  TaskStatus (constant) — 5-5 — Enum of allowed task lifecycle states
 models/ — Pydantic data models for tasks, state, and verdicts
 """
