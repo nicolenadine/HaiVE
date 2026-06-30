@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -188,10 +189,34 @@ class CodeDiscoveryAgent:
     @staticmethod
     def _parse_result(content: str) -> DiscoveryResult:
         text = content.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:]).rsplit("```", 1)[0].strip()
+
+        # Try direct parse first (ideal: response is just the JSON object).
         try:
             return DiscoveryResult.model_validate_json(text)
         except (ValidationError, ValueError):
-            return DiscoveryResult(sections=[], status="empty")
+            pass
+
+        # Extract from markdown code fences if the model wrapped the JSON.
+        fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if fence_match:
+            try:
+                return DiscoveryResult.model_validate_json(fence_match.group(1).strip())
+            except (ValidationError, ValueError):
+                pass
+
+        # Last resort: find the outermost { ... } in the text.
+        brace_start = text.find("{")
+        if brace_start >= 0:
+            depth = 0
+            for i, ch in enumerate(text[brace_start:], brace_start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return DiscoveryResult.model_validate_json(text[brace_start : i + 1])
+                        except (ValidationError, ValueError):
+                            break
+
+        return DiscoveryResult(sections=[], status="empty")

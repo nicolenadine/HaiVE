@@ -68,8 +68,10 @@ files and symbols the task actually needs.
 
 ## Output
 
-When you have finished exploring, emit a single JSON object (no markdown \
-code fences, no explanation) in this exact schema:
+When you have finished exploring, output ONLY a raw JSON object — \
+no preamble, no explanation, no markdown fences, nothing else. \
+The very first character of your response must be `{`. \
+Schema:
 
 {
   "sections": [
