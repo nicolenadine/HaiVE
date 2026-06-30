@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import yaml
 from pydantic import ValidationError
 
@@ -37,6 +39,15 @@ class AgentRegistry:
         missing = [r.value for r in AgentRole if r not in agents]
         if missing:
             raise RuntimeError(f"Registry is missing required roles: {missing}")
+
+        registry_dir = os.path.dirname(os.path.abspath(path))
+        for role, config in agents.items():
+            prompt_path = os.path.join(registry_dir, config.system_prompt)
+            if not os.path.isfile(prompt_path):
+                raise RuntimeError(
+                    f"system_prompt file not found for '{role.value}': {prompt_path!r}"
+                )
+
         return cls(agents)
 
     def get_agent(self, role: AgentRole) -> AgentConfig:
