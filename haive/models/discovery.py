@@ -17,3 +17,9 @@ class DiscoveredSection(BaseModel):
 class DiscoveryResult(BaseModel):
     sections: list[DiscoveredSection]
     status: Literal["found", "empty"]
+
+
+class LoadedSection(BaseModel):
+    file: str    # full repo-relative path
+    source: str  # loaded file content or line-range slice
+    reason: str  # carried through from DiscoveredSection

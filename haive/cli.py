@@ -269,6 +269,78 @@ def discover(
         typer.echo()
 
 
+# ── Load command ─────────────────────────────────────────────────────────────
+
+@app.command("load")
+def load(
+    description: str = typer.Argument(..., help="What the task needs to accomplish."),
+    title: str = typer.Option("", "--title", help="Short task title (defaults to first 60 chars of description)."),
+    budget: int = typer.Option(16000, "--budget", help="Token budget for section loading."),
+) -> None:
+    """Discover relevant files and load their source content (discover + load pipeline)."""
+    import os
+    import types
+
+    _preflight_checks()
+    root = os.getcwd()
+
+    from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
+    from haive.discovery.file_index_service import FileIndexService
+    from haive.llm.model_client import ModelClient
+    from haive.llm.tier_config import TierConfig
+    from haive.llm.token_counter import TokenCounter
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    task_title = title or description[:60]
+    task = types.SimpleNamespace(title=task_title, description=description)
+
+    tier_config = TierConfig.from_settings(settings)
+    client = ModelClient(settings)
+    agent = CodeDiscoveryAgent(client, tier_config.low)
+    service = FileIndexService(client, tier_config.low)
+
+    typer.echo(f'Loading context for: "{task_title}"\n')
+
+    start = time.perf_counter()
+    result = agent.discover(task, root, budget)
+    discover_elapsed = time.perf_counter() - start
+
+    typer.echo(f"Discovery: {result.status}  ({discover_elapsed:.1f}s)")
+
+    if not result.sections:
+        typer.echo("No relevant sections found.")
+        return
+
+    typer.echo(f"Sections found: {len(result.sections)}  |  budget: {budget:,} tokens\n")
+
+    try:
+        loaded = service.load_sections(result, root, budget)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    tokens_used = sum(TokenCounter.estimate(s.source) for s in loaded)
+    bar = "─" * 60
+
+    for i, section in enumerate(loaded, 1):
+        typer.echo(f"{bar}")
+        typer.echo(f"  {i}/{len(loaded)}  {section.file}  |  {TokenCounter.estimate(section.source):,} tokens")
+        typer.echo(f"  {section.reason}")
+        typer.echo(f"{bar}")
+        typer.echo(section.source)
+
+    typer.echo(f"{bar}")
+    dropped = len(result.sections) - len(loaded)
+    drop_note = f"  |  {dropped} dropped (budget)" if dropped else ""
+    typer.echo(f"Loaded: {len(loaded)}/{len(result.sections)} sections  |  {tokens_used:,}/{budget:,} tokens used{drop_note}")
+
+
 # ── Run command ───────────────────────────────────────────────────────────────
 
 @app.command()
