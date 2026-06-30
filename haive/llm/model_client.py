@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 
 import litellm
 
@@ -19,9 +20,20 @@ class ModelClient:
             os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
         if settings.openai_api_key:
             os.environ["OPENAI_API_KEY"] = settings.openai_api_key
-        # Disable LiteLLM's async logging worker — we use synchronous calls only
-        # and the worker produces RuntimeWarnings about destroyed tasks on exit.
         litellm.callbacks = []
+        # LiteLLM's internal LoggingWorker creates asyncio tasks that are never
+        # awaited when using synchronous completion. Suppress the resulting
+        # RuntimeWarnings — they are cosmetic and not actionable from our side.
+        warnings.filterwarnings(
+            "ignore",
+            message="coroutine .* was never awaited",
+            category=RuntimeWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="Task was destroyed but it is pending",
+            category=RuntimeWarning,
+        )
 
     def call(self, tier: Tier, prompt: str, system: str, max_tokens: int) -> ModelResponse:
         primary = tier.models[0]
