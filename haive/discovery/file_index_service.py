@@ -112,12 +112,18 @@ class FileIndexService:
                 content = agent_md_path.read_text(encoding="utf-8")
                 content = self._remove_deleted_entries(content, set(changes["deleted"]))
                 agent_md_path.write_text(content, encoding="utf-8")
+                # TODO: if this deletion empties the directory of source files, remove
+                # its agent.md and update the parent's agent.md to drop the subdir entry
+                # (build_plan.md §Step15).
 
             if changes["modified"]:
                 if agent_md_path.is_file():
                     existing = agent_md_path.read_text(encoding="utf-8")
                     self._update_for_dir(dir_abs, changes["modified"], existing, root)
                 else:
+                    # New directory: generate from scratch.
+                    # TODO: after generation, also update the parent directory's
+                    # agent.md to add the new subdirectory entry (build_plan.md §Step15).
                     source_files = sorted(
                         f for f in os.listdir(dir_abs) if self._is_source_file(f)
                     )
