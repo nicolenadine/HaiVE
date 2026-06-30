@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "FileToCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Repo-relative path for the new file.",
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "description": "Full content to write.",
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "title": "FileToCreate",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "files": {
+      "description": "Files to create.",
+      "items": {
+        "$ref": "#/$defs/FileToCreate"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "notes": {
+      "default": "",
+      "description": "Optional notes for the reviewer.",
+      "title": "Notes",
+      "type": "string"
+    }
+  },
+  "required": [
+    "files"
+  ],
+  "title": "ScaffoldAgentOutput",
+  "type": "object"
+}
