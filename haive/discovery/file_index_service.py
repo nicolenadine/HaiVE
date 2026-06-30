@@ -25,9 +25,15 @@ class FileIndexService:
         self._validator = AgentMdValidator()
 
     def generate_all(self, root: str) -> None:
-        """Generate agent.md for every source directory under root."""
+        """Generate agent.md for every source directory under root, leaves first.
+
+        Bottom-up order ensures child agent.md files exist before the parent
+        is generated, so the parent agent can read them for accurate subdirectory
+        descriptions rather than guessing from directory names alone.
+        """
         patterns = self._load_gitignore_patterns(root)
-        for dir_path, source_files, subdirs in self._walk_source_dirs(root, patterns):
+        dirs = list(self._walk_source_dirs(root, patterns))
+        for dir_path, source_files, subdirs in reversed(dirs):
             self._generate_for_dir(dir_path, source_files, subdirs, root)
 
     def validate_all(self, root: str) -> dict[str, list[str]]:

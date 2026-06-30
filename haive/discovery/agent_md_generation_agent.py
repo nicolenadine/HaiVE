@@ -57,12 +57,18 @@ def _build_user_prompt(
         parts.append(f"  {file_path}")
     if subdirs:
         parts.append("")
-        parts.append("Immediate subdirectories (list these, do not read them):")
+        parts.append(
+            "Immediate subdirectories (read each one's agent.md for its description):"
+        )
         for d in subdirs:
-            parts.append(f"  {d}/")
+            agent_md_path = f"{d}/agent.md" if rel == "." else f"{rel}/{d}/agent.md"
+            parts.append(f"  {d}/  →  read_file('{agent_md_path}')")
     parts.append("")
     parts.append(
-        "Read every source file above using read_file, then write the agent.md. "
+        "Read every source file above using read_file. "
+        "For subdirectories, read their agent.md to write an accurate one-line description "
+        "of what that subdirectory contains. "
+        "If a subdirectory has no agent.md, write a brief description based on its name. "
         "Start your response directly with '## Files' — no preamble."
     )
     if prior_violations:
@@ -103,7 +109,7 @@ class AgentMdGenerationAgent:
                 ),
             },
         ]
-        max_tool_calls = len(source_files) + 5
+        max_tool_calls = len(source_files) + len(subdirs) + 5
         tool_call_count = 0
 
         while tool_call_count < max_tool_calls:
