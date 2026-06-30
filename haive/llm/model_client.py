@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import warnings
 
 import litellm
+
+# LiteLLM's LoggingWorker creates asyncio tasks that are never awaited when
+# using synchronous completion. Two suppression paths are needed:
+# 1. warnings.filterwarnings for RuntimeWarnings emitted via Python's warnings module
+# 2. logging.getLogger("asyncio") for "Task was destroyed" which goes through
+#    asyncio's logger, not through warnings
+warnings.filterwarnings("ignore", message="coroutine .* was never awaited", category=RuntimeWarning)
+warnings.filterwarnings("ignore", message="Enable tracemalloc", category=RuntimeWarning)
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.errors import APIError
@@ -21,19 +31,6 @@ class ModelClient:
         if settings.openai_api_key:
             os.environ["OPENAI_API_KEY"] = settings.openai_api_key
         litellm.callbacks = []
-        # LiteLLM's internal LoggingWorker creates asyncio tasks that are never
-        # awaited when using synchronous completion. Suppress the resulting
-        # RuntimeWarnings — they are cosmetic and not actionable from our side.
-        warnings.filterwarnings(
-            "ignore",
-            message="coroutine .* was never awaited",
-            category=RuntimeWarning,
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message="Task was destroyed but it is pending",
-            category=RuntimeWarning,
-        )
 
     def call(self, tier: Tier, prompt: str, system: str, max_tokens: int) -> ModelResponse:
         primary = tier.models[0]
