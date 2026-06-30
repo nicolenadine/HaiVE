@@ -144,6 +144,61 @@ def _print_dry_run_output(project, output) -> None:
         typer.echo()
 
 
+# ── Index command ─────────────────────────────────────────────────────────────
+
+@app.command("index")
+def index(
+    validate: bool = typer.Option(
+        False,
+        "--validate",
+        is_flag=True,
+        help="Validate existing agent.md files without regenerating them.",
+    ),
+) -> None:
+    """Generate (or validate) per-directory agent.md index files."""
+    import os
+
+    _preflight_checks()
+    root = os.getcwd()
+
+    from haive.discovery.file_index_service import AgentMdGenerationError, FileIndexService
+    from haive.llm.model_client import ModelClient
+    from haive.llm.tier_config import TierConfig
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    tier_config = TierConfig.from_settings(settings)
+    model_client = ModelClient(settings)
+    service = FileIndexService(model_client, tier_config.low)
+
+    if validate:
+        violations = service.validate_all(root)
+        if not violations:
+            typer.echo("All agent.md files are valid.")
+            return
+        for path, messages in sorted(violations.items()):
+            typer.echo(f"\n{path}:")
+            for msg in messages:
+                typer.echo(f"  - {msg}")
+        typer.echo(
+            f"\n{len(violations)} file(s) have violations.", err=True
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Indexing {root} ...")
+    try:
+        service.generate_all(root)
+    except AgentMdGenerationError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Done. agent.md files written.")
+
+
 # ── Run command ───────────────────────────────────────────────────────────────
 
 @app.command()
