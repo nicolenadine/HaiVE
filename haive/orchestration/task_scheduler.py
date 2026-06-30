@@ -30,8 +30,9 @@ class TaskScheduler:
         tasks: list[Task],
         executor_factory: Callable[[Task], TaskExecutionRecord],
         pm: PMAdapter,
+        on_complete: Callable[[TaskExecutionRecord], None] | None = None,
     ) -> None:
-        asyncio.run(self._run(tasks, executor_factory, pm))
+        asyncio.run(self._run(tasks, executor_factory, pm, on_complete))
 
     # ── async core ────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ class TaskScheduler:
         tasks: list[Task],
         executor_factory: Callable[[Task], TaskExecutionRecord],
         pm: PMAdapter,
+        on_complete: Callable[[TaskExecutionRecord], None] | None = None,
     ) -> None:
         statuses: dict[str, TaskStatus] = {t.task_id: t.status for t in tasks}
         task_map: dict[str, Task] = {t.task_id: t for t in tasks}
@@ -69,6 +71,9 @@ class TaskScheduler:
                 record: TaskExecutionRecord = await future
                 new_status = self._status_from_record(record)
                 statuses[record.task_id] = new_status
+
+                if on_complete is not None:
+                    on_complete(record)
 
                 if new_status == TaskStatus.NEEDS_HUMAN_REVIEW:
                     self._mark_blocked_downstream(
