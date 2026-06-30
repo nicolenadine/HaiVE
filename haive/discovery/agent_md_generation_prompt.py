@@ -42,6 +42,9 @@ Key symbols (optional) — indented directly below their file:
 - description is a concise phrase describing what the symbol does. \
 Required for all symbol entries.
 - Only list symbols for file entries, not subdirectory entries.
+- List only symbols that are meaningful navigation targets: classes, public \
+helper functions, key constants, and fixtures. Do NOT list individual test \
+functions (test_*) — they are discovered by the test runner, not by agents.
 - At most {AGENT_MD_MAX_SYMBOLS} symbol entries across the whole file.
 
 General rules:
