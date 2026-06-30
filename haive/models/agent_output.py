@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── Scaffold Agent ────────────────────────────────────────────────────────────
@@ -51,11 +51,21 @@ class ReviewAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     passed: bool = Field(description="True if the submission meets the acceptance criteria.")
+    uncertain: bool = Field(
+        default=False,
+        description="True when the reviewer cannot determine correctness. Mutually exclusive with passed=True.",
+    )
     findings: list[ReviewFinding] = Field(
         default_factory=list,
         description="Issues found. Empty when passed=True.",
     )
     summary: str = Field(description="One-paragraph summary of the review.")
+
+    @model_validator(mode="after")
+    def uncertain_and_passed_are_exclusive(self) -> "ReviewAgentOutput":
+        if self.uncertain and self.passed:
+            raise ValueError("uncertain=True and passed=True are mutually exclusive.")
+        return self
 
 
 # ── Test Generator ────────────────────────────────────────────────────────────

@@ -54,6 +54,12 @@
       "title": "Passed",
       "type": "boolean"
     },
+    "uncertain": {
+      "default": false,
+      "description": "True when the reviewer cannot determine correctness. Mutually exclusive with passed=True.",
+      "title": "Uncertain",
+      "type": "boolean"
+    },
     "findings": {
       "description": "Issues found. Empty when passed=True.",
       "items": {
