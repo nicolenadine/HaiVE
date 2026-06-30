@@ -246,6 +246,18 @@ Format per entry:
 
 ---
 
+### Token budget enforced at section loading, not at discovery
+
+**Decision:** `CodeDiscoveryAgent` outputs sections in order of decreasing relevance (most important first) but does not attempt to enforce a token budget. Token budget enforcement is the responsibility of `FileIndexService.load_sections()`, which processes sections in the order given, accumulates an estimated token count via `TokenCounter.estimate()`, and stops loading once the next section would exceed the budget.
+
+**Alternatives:** Have the discovery agent count tokens before selecting sections; enforce the budget in `ContextAssembler`.
+
+**Rationale:** The discovery agent only reads `agent.md` index files, not the actual source files it is selecting. It therefore has no basis for counting the tokens those source files contain — asking it to enforce a budget would be asking it to guess. Enforcement at `load_sections()` is the first point in the pipeline where actual file content is available and can be measured. `ContextAssembler` is deliberately I/O-free and receives pre-loaded content, so it cannot enforce a budget either. The agent's contribution to budget management is to rank sections by relevance, so that when the loader stops at the budget limit, the dropped sections are the least important ones.
+
+**Tradeoff:** The agent's relevance ordering is LLM-produced and not perfectly reproducible. If the agent misjudges relevance ordering, lower-priority sections may be loaded while higher-priority ones are dropped. Mitigated by the fact that the same model is reading the same structured agent.md summaries each time and the task description is deterministic — ordering tends to be stable for a given task.
+
+---
+
 ### agent.md format validated by a pure-Python structural validator
 
 **Decision:** A deterministic, non-LLM validator checks generated `agent.md` files against a fixed structural format (required section headers, per-file line format, no prose paragraphs, line count limits). It runs automatically after generation (with bounded retries on failure) and is exposed via `haive index --validate` to check existing files without regenerating them.

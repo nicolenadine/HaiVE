@@ -414,7 +414,7 @@ Each step in this plan represents one milestone of work: focused, independently 
 - `haive/discovery/code_discovery_agent.py` — `CodeDiscoveryAgent` class
   - `discover(task: Task, root: str, token_budget: int) -> DiscoveryResult`
   - Tools exposed to the agent: `read_agent_md(directory: str) -> str`, `list_subdirectories(directory: str) -> list[str]`
-  - System prompt enforces guardrails: max exploration depth, max tool-call count, must respect `token_budget` when selecting sections, must return output matching `DiscoveryResult`
+  - System prompt enforces guardrails: max exploration depth, max tool-call count, must list sections in order of decreasing relevance (most important first), must return output matching `DiscoveryResult`; token budget is not enforced here — the agent cannot count tokens of content it has not loaded
   - Starts at the repo root's `agent.md`; descends into a subdirectory only when its parent's `agent.md` suggests relevance
   - Model tier: low tier (same routing as Step 12)
 - Unit tests (mocked LLM/tool calls): given a two-level fixture tree, the agent finds the directly relevant file without reading unrelated sibling subdirectories; a guardrail test where the agent attempts to exceed max depth/call count is cut off and returns its best-effort result rather than erroring; a no-match case returns `status="empty"`
@@ -435,16 +435,17 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 **Scope**
 - `haive/models/discovery.py` addition — `LoadedSection` (`file: str`, `source: str`, `reason: str`)
-- `FileIndexService.load_sections(result: DiscoveryResult, root: str) -> list[LoadedSection]`
-  - For `full=True` entries: read the whole file
-  - For `start_line`/`end_line` entries: read the file and slice `lines[start_line - 1 : end_line]` directly — no parsing needed
-  - This is the only file-content read in the discovery pipeline; `ContextAssembler` (Step 16) receives `list[LoadedSection]` as a parameter and performs no I/O itself
-- Unit tests: a `full=True` section returns the entire file content; a `start_line`/`end_line` section returns exactly that range; a discovery entry pointing at a file that no longer exists raises a descriptive error rather than silently skipping
+- `FileIndexService.load_sections(result: DiscoveryResult, root: str, token_budget: int) -> list[LoadedSection]`
+  - Processes `result.sections` in the order returned by `CodeDiscoveryAgent` (which lists them most-relevant-first)
+  - For each section: load content (`full=True` → whole file; `start_line`/`end_line` → `lines[start_line - 1 : end_line]`), estimate its token cost via `TokenCounter.estimate()`, and accumulate. Stop loading when adding the next section would exceed `token_budget`; sections after the cutoff are silently dropped
+  - This is the only file-content read in the discovery pipeline; `ContextAssembler` (Step 16) receives `list[LoadedSection]` and performs no I/O itself
+- Unit tests: a `full=True` section returns the entire file content; a `start_line`/`end_line` section returns exactly that range; a discovery entry pointing at a file that no longer exists raises a descriptive error rather than silently skipping; sections exceeding the token budget are dropped in priority order (last sections dropped first)
 
 **Success Criteria**
 - [ ] `full=True` returns the complete file content
 - [ ] A `start_line`/`end_line` section returns exactly those lines, no more
 - [ ] A discovery entry pointing at a missing file raises a descriptive error
+- [ ] Sections are loaded in the order given by `DiscoveryResult.sections`; loading stops when `token_budget` would be exceeded
 
 **Deferred:** Regeneration trigger (Step 15).
 

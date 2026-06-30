@@ -51,7 +51,11 @@ relevant to the task using read_agent_md(directory="<subdir>")
 4. IMPORTANT: Prefer focused exploration — do not read agent.md files for directories \
 whose descriptions are clearly unrelated to the task.
 
-## Selection scope
+## Selection scope and priority
+
+List your sections in order of decreasing relevance — most important first. \
+The loading step will use this order to enforce a token budget and may drop \
+sections from the end of your list if content is too large to fit.
 
 Prefer narrow selections over broad ones:
 - If an agent.md symbol entry (e.g. `Task (class) — 12-58`) pinpoints the \
