@@ -3,7 +3,6 @@ import re
 from haive.discovery.constants import (
     AGENT_MD_MAX_DESCRIPTION_LEN,
     AGENT_MD_MAX_LINES,
-    AGENT_MD_MAX_SYMBOLS,
     AGENT_MD_MIN_DESCRIPTION_LEN,
     AGENT_MD_PROSE_WORD_THRESHOLD,
 )
@@ -73,12 +72,10 @@ class AgentMdValidator:
 
     def _check_files_section(self, entries: list[str]) -> list[str]:
         violations: list[str] = []
-        symbol_count = 0
 
         for entry in entries:
             if entry.startswith("  "):
                 # Indented symbol sub-entry
-                symbol_count += 1
                 m = _SYMBOL_ENTRY_RE.match(entry)
                 if not m:
                     violations.append(f"Symbol entry has wrong format: {entry.strip()}")
@@ -100,9 +97,6 @@ class AgentMdValidator:
                     violations.append(f"Files entry description too short: {entry}")
                 elif len(description) > AGENT_MD_MAX_DESCRIPTION_LEN:
                     violations.append(f"Files entry description too long: {entry}")
-
-        if symbol_count > AGENT_MD_MAX_SYMBOLS:
-            violations.append(f"Symbol entries exceed {AGENT_MD_MAX_SYMBOLS}-entry limit")
 
         return violations
 

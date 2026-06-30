@@ -3,7 +3,6 @@ from haive.discovery.agent_md import AgentMdValidator
 from haive.discovery.constants import (
     AGENT_MD_MAX_DESCRIPTION_LEN,
     AGENT_MD_MAX_LINES,
-    AGENT_MD_MAX_SYMBOLS,
     AGENT_MD_MIN_DESCRIPTION_LEN,
 )
 
@@ -185,20 +184,6 @@ class TestSymbolEntryFormat:
         )
         assert validator.validate(content) == []
 
-    def test_exceeding_max_symbols_is_flagged(self, validator):
-        symbol_lines = "\n".join(
-            f"  sym{i} (function) — {i}-{i}" for i in range(1, AGENT_MD_MAX_SYMBOLS + 2)
-        )
-        content = f"## Files\n\ntask.py — Task model\n{symbol_lines}\n"
-        violations = validator.validate(content)
-        assert any(f"exceed {AGENT_MD_MAX_SYMBOLS}-entry limit" in v for v in violations)
-
-    def test_exactly_max_symbols_is_valid(self, validator):
-        symbol_lines = "\n".join(
-            f"  sym{i} (function) — {i}-{i}" for i in range(1, AGENT_MD_MAX_SYMBOLS + 1)
-        )
-        content = f"## Files\n\ntask.py — Task model\n{symbol_lines}\n"
-        assert validator.validate(content) == []
 
 
 class TestProseParagraph:
