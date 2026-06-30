@@ -13,8 +13,9 @@ _ALLOWED_KINDS = {"class", "function", "method", "constant"}
 
 # Unindented file or subdirectory entry: path — description
 _FILES_ENTRY_RE = re.compile(r"^[^\s].+ — .+$")
-# 2-space indented symbol sub-entry: "  name (kind) — start-end"
-_SYMBOL_ENTRY_RE = re.compile(r"^  (\S+) \((\w+)\) — (\d+)-(\d+)$")
+# 2-space indented symbol sub-entry: "  name (kind) — start-end — description"
+# Description is optional but encouraged.
+_SYMBOL_ENTRY_RE = re.compile(r"^  (\S+) \((\w+)\) — (\d+)-(\d+)(?: — .+)?$")
 
 
 class AgentMdValidator:

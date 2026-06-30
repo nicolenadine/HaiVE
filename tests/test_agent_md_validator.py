@@ -127,6 +127,24 @@ class TestSymbolEntryFormat:
         )
         assert validator.validate(content) == []
 
+    def test_symbol_entry_with_description_passes(self, validator):
+        content = (
+            "## Files\n\n"
+            "task.py — Task model\n"
+            "  Task (class) — 12-58 — Pydantic model for a unit of work\n"
+            "  run (method) — 45-88 — Executes the task and returns a result\n"
+        )
+        assert validator.validate(content) == []
+
+    def test_symbol_entry_with_description_is_not_flagged_as_prose(self, validator):
+        content = (
+            "## Files\n\n"
+            "task.py — Task model\n"
+            "  load_state (function) — 1-30 — Reads and validates state.json from disk\n"
+        )
+        violations = validator.validate(content)
+        assert not any("Prose paragraph detected" in v for v in violations)
+
     def test_missing_kind_parens_is_flagged(self, validator):
         content = "## Files\n\ntask.py — Task model\n  Task — 12-58\n"
         violations = validator.validate(content)

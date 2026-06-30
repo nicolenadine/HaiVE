@@ -1,4 +1,5 @@
 import shutil
+import time
 from datetime import datetime, timezone
 
 import typer
@@ -191,12 +192,14 @@ def index(
         raise typer.Exit(code=1)
 
     typer.echo(f"Indexing {root} ...")
+    start = time.perf_counter()
     try:
         service.generate_all(root)
     except AgentMdGenerationError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
-    typer.echo("Done. agent.md files written.")
+    elapsed = time.perf_counter() - start
+    typer.echo(f"Done. agent.md files written in {elapsed:.1f}s.")
 
 
 # ── Run command ───────────────────────────────────────────────────────────────
