@@ -25,6 +25,8 @@ You receive a JSON object with these fields:
   depends_on, lineage_depth, recovery_for, status, verdict, and attempt_log
 - new_comments: list of new human comments since the last run (task_id, author, body, created_at)
 - agent_summary: one-line description per available agent role
+- repo_map: a high-level index of the repository — per-directory one-line summaries and,
+  for each file, its top-level symbols (functions/classes/methods) with approximate line ranges
 
 ## Output
 
@@ -137,8 +139,18 @@ Do not create a code_reviewer_agent task as a generic final quality gate. The Ta
 {examples_block}
 ## Recovery rules
 
-If a task has status "needs_human_review" AND its task_id appears in new_comments AND
-lineage_depth < {max_recovery_depth}:
+A task is eligible for automatic recovery when lineage_depth < {max_recovery_depth} AND it has
+status "needs_human_review" AND either of these is true:
+- its verdict.infeasible is true — the reviewer determined the acceptance criteria were
+  architecturally unsatisfiable given the real code, not an implementation mistake. Use
+  verdict.reason and attempt_log to write a corrected task that avoids the exact contradiction
+  identified; do not resubmit the same requirement. No human comment is required for this case —
+  the reviewer's own reasoning is the signal.
+- its task_id appears in new_comments — a human has provided guidance. This path still requires
+  a new comment; do not recover a plain needs_human_review task (verdict.infeasible false or
+  verdict absent) without one.
+
+When either condition holds:
 - Create a recovery NewTask with recovery_for set to the failed task's task_id
 - Set lineage_depth = failed_task.lineage_depth + 1
 
@@ -148,6 +160,14 @@ Never create a recovery task if lineage_depth >= {max_recovery_depth}.
 
 Set done=true only when every task has status "complete" and no pending, blocked, or
 in_progress tasks remain. new_tasks must be empty when done=true.
+
+## Using the repo map
+
+repo_map is a high-level structural summary, not source code — use it only to sanity-check that a
+task's requested behavior is actually possible given the real structure (for example, do not require
+a callback to observe data it structurally never receives, or split work across files in a way the
+real dependency structure does not support). Treat line ranges as approximate and possibly stale —
+never cite them, and never let repo_map override the Prohibitions below.
 
 ## Prohibitions
 

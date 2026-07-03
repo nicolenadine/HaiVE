@@ -15,6 +15,15 @@ from haive.orchestration.orchestrator_prompt import build_orchestrator_prompt
 _ORCHESTRATOR_MAX_OUTPUT_TOKENS = 4096
 
 
+class OrchestratorStalledError(RuntimeError):
+    """Raised when the orchestrator has no further automatic action to take.
+
+    Distinct from a plain RuntimeError so callers can stop a run loop cleanly
+    instead of treating this as a bug — it's a safety mechanism (empty output,
+    or a recovery attempt hitting max_recovery_depth) working as designed.
+    """
+
+
 def _extract_json(content: str) -> str:
     stripped = content.strip()
     if stripped.startswith("{"):
@@ -67,7 +76,7 @@ class Orchestrator:
             ) from e
 
         if not output.done and not output.new_tasks:
-            raise RuntimeError(
+            raise OrchestratorStalledError(
                 "Orchestrator returned empty new_tasks without signaling done. "
                 "This is a configuration error — the orchestrator must produce "
                 "at least one new task or set done=true."
@@ -78,7 +87,7 @@ class Orchestrator:
             if new_task.recovery_for is not None:
                 source_depth = task_depth.get(new_task.recovery_for, 0)
                 if source_depth + 1 > self._max_recovery_depth:
-                    raise RuntimeError(
+                    raise OrchestratorStalledError(
                         f"Recovery task for '{new_task.recovery_for}' would exceed "
                         f"max_recovery_depth ({self._max_recovery_depth}). "
                         f"Source task lineage_depth={source_depth}."
