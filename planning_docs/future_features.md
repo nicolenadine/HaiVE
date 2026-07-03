@@ -65,6 +65,25 @@ agent prompts (`prompts/`), and the file-writing logic in the Task Executor.
 
 ---
 
+## Reviewer & Orchestrator Context Awareness
+
+### Full repo navigation for the Reviewer Agent
+`ReviewAgent` can currently only request a file it can already name from something visible
+in front of it (an import statement, a call site) — it cannot browse the repo from scratch.
+If reviews keep missing gaps because the relevant file was never referenced anywhere in view,
+give it the same `read_agent_md`/`list_subdirectories` navigation tools `CodeDiscoveryAgent`
+uses, so it can search rather than only confirm a lead it already has. Deferred to keep the
+initial on-demand file-read change small; revisit after seeing whether path-only requests move
+the needle in practice.
+
+### Raise `max_waves_per_run` once autonomous recovery proves reliable
+`haive run` currently caps automatic wave looping at 2 per invocation — deliberately
+conservative while the infeasible-verdict auto-recovery and orchestrator repo-map changes are
+new and unproven. Raise this once a track record of correct automatic recoveries builds up
+confidence that a stalled or misbehaving loop won't silently burn many waves of tokens.
+
+---
+
 ## GitHub Native Issue Relationships
 
 `haive_depends_on` is currently a text custom field (comma-separated issue numbers) because
