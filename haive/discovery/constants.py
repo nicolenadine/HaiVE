@@ -27,6 +27,12 @@ CODE_DISCOVERY_MAX_TOOL_CALLS = 20
 # max_tokens for each call_single() in the discovery loop (covers JSON output).
 CODE_DISCOVERY_MAX_TOKENS = 4096
 
+# Repo map for the Orchestrator (FileIndexService.read_repo_map).
+# Token budget for the concatenated agent.md tree handed to the orchestrator —
+# a small slice of its overall context budget, since this is a summary map,
+# not source code.
+ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET = 8_000
+
 # File extensions treated as source files when walking the repo.
 # Directories that contain no file matching this set are skipped.
 SOURCE_EXTENSIONS: frozenset[str] = frozenset(

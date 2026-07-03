@@ -263,6 +263,58 @@ class TestGitignoreHandling:
         assert service._should_skip("haive", [".venv"]) is False
 
 
+# ── read_repo_map ─────────────────────────────────────────────────────────────
+
+class TestReadRepoMap:
+    def test_concatenates_agent_md_from_multiple_directories_root_first(self, service, tmp_path):
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "agent.md").write_text("## Files\n\nsub summary\n")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+
+        assert "root summary" in repo_map
+        assert "sub summary" in repo_map
+        assert repo_map.index("root summary") < repo_map.index("sub summary")
+
+    def test_directory_without_agent_md_is_skipped(self, service, tmp_path):
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        no_index = tmp_path / "no_index"
+        no_index.mkdir()
+        (no_index / "code.py").write_text("x = 1")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+
+        assert "no_index" not in repo_map
+
+    def test_gitignore_excluded_directory_is_skipped(self, service, tmp_path):
+        (tmp_path / ".gitignore").write_text("ignored\n")
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        ignored = tmp_path / "ignored"
+        ignored.mkdir()
+        (ignored / "agent.md").write_text("## Files\n\nignored summary\n")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+
+        assert "ignored summary" not in repo_map
+
+    def test_budget_truncation_keeps_root_drops_deeper_dirs(self, service, tmp_path):
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "agent.md").write_text("## Files\n\n" + ("x" * 5000) + "\n")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=50)
+
+        assert "root summary" in repo_map
+        assert "x" * 5000 not in repo_map
+
+    def test_empty_repo_returns_empty_string(self, service, tmp_path):
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+        assert repo_map == ""
+
+
 # ── load_sections ─────────────────────────────────────────────────────────────
 
 from haive.models.discovery import DiscoveredSection, DiscoveryResult

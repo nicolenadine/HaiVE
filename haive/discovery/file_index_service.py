@@ -9,6 +9,7 @@ from haive.discovery.agent_md import AgentMdValidator
 from haive.discovery.agent_md_generation_agent import AgentMdGenerationAgent
 from haive.discovery.constants import (
     AGENT_MD_MAX_GENERATION_RETRIES,
+    ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET,
     SOURCE_EXTENSIONS,
 )
 from haive.llm.model_client import ModelClient
@@ -37,6 +38,37 @@ class FileIndexService:
         dirs = list(self._walk_source_dirs(root, patterns))
         for dir_path, source_files, subdirs in reversed(dirs):
             self._generate_for_dir(dir_path, source_files, subdirs, root)
+
+    def read_repo_map(
+        self, root: str, token_budget: int = ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET
+    ) -> str:
+        """Concatenate every existing agent.md under root into one repo map.
+
+        Root-to-leaf order (os.walk topdown) means truncation on a tight
+        budget drops the least-central (deepest) directories first, keeping
+        the broadest summary intact.
+        """
+        patterns = self._load_gitignore_patterns(root)
+        blocks: list[str] = []
+        tokens_used = 0
+
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+            dirnames[:] = sorted(d for d in dirnames if not self._should_skip(d, patterns))
+            if "agent.md" not in filenames:
+                continue
+
+            rel = os.path.relpath(dirpath, root)
+            label = "." if rel == "." else rel
+            content = Path(dirpath, "agent.md").read_text(encoding="utf-8").strip()
+            block = f"### {label}/\n\n{content}"
+
+            block_tokens = TokenCounter.estimate(block)
+            if tokens_used + block_tokens > token_budget:
+                break
+            blocks.append(block)
+            tokens_used += block_tokens
+
+        return "\n\n".join(blocks)
 
     def load_sections(
         self, result: DiscoveryResult, root: str, token_budget: int
