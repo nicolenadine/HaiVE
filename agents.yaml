@@ -20,7 +20,7 @@ implementation_agent:
     - "handle edge cases and error paths"
   system_prompt: "prompts/implementation_agent.md"
   output_schema: "schemas/implementation_output.json"
-  max_tokens: 8192
+  max_tokens: 16384
   retry_limit: 2
   prompt_version: "1.0"
 
@@ -33,9 +33,10 @@ code_editor_agent:
     - "avoid unrelated reformatting"
   system_prompt: "prompts/code_editor_agent.md"
   output_schema: "schemas/code_editor_output.json"
-  max_tokens: 4096
+  max_tokens: 16384
   retry_limit: 2
   prompt_version: "1.0"
+  context_budget_multiplier: 2.0
 
 refactoring_agent:
   description: "Refactors existing code for clarity, testability, or performance without changing behaviour."

@@ -43,10 +43,15 @@ class GitHubVCSAdapter:
 
     def create_branch(self, branch_name: str, base_branch: str) -> None:
         source = self._repo_obj.get_branch(base_branch)
-        self._repo_obj.create_git_ref(
-            ref=f"refs/heads/{branch_name}",
-            sha=source.commit.sha,
-        )
+        try:
+            self._repo_obj.create_git_ref(
+                ref=f"refs/heads/{branch_name}",
+                sha=source.commit.sha,
+            )
+        except github.GithubException as exc:
+            if exc.status == 422:  # branch already exists — reuse it
+                return
+            raise
 
     def push_commits(self, branch: str, changed_files: list[str], message: str) -> None:
         try:
