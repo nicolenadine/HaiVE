@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import json
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from haive.discovery.path_safety import resolve_within_root
 from haive.execution.output_validator import OutputValidationError, OutputValidator
 from haive.llm.model_client import ModelClient
+from haive.llm.model_response import ModelResponse
 from haive.llm.tier import Tier
+from haive.llm.token_counter import TokenCounter
 from haive.models.agent_output import ReviewAgentOutput
+from haive.models.context_request import ContextRequest
 from haive.models.discovery import LoadedSection
 from haive.models.enums import AgentRole
 from haive.models.review import ReviewVerdict
@@ -24,12 +27,21 @@ REVIEWER_MODELS = [
 _REVIEW_MAX_TOKENS = 2048
 _REVIEW_CONTEXT_BUDGET = 32_000
 
+# Safety valve against non-progressing loops (e.g. repeatedly requesting an
+# empty or nonexistent file, which consumes no token budget). Not a scope
+# limit — the token budget is what bounds how much context can be pulled in.
+_REVIEW_MAX_CONTEXT_ROUNDS = 20
+
 
 class ReviewAgent:
     """LLM-as-judge that evaluates task agent output against acceptance criteria.
 
     Advances through REVIEWER_MODELS (cheapest first) when uncertain.
     If all models return uncertain, returns a definitive passed=False verdict.
+
+    May read additional repo files on demand (via a ContextRequest response)
+    when it needs to verify a claim not covered by loaded_sections — bounded
+    by a shared token budget across the whole review() call.
     """
 
     def __init__(
@@ -37,10 +49,12 @@ class ReviewAgent:
         model_client: ModelClient,
         system_prompt: str,
         guidelines: str,
+        root: str,
     ) -> None:
         self._client = model_client
         self._system_prompt = system_prompt
         self._guidelines = guidelines
+        self._root = root
         self._validator = OutputValidator()
 
     def review(
@@ -52,15 +66,14 @@ class ReviewAgent:
         discovery_note: str,
     ) -> ReviewVerdict:
         prompt = self._build_prompt(task, agent_output, loaded_sections, discovery_status, discovery_note)
+        remaining_budget = _REVIEW_CONTEXT_BUDGET
 
         for i, model in enumerate(REVIEWER_MODELS):
             tier = Tier(models=[model], max_attempts=1, context_budget=_REVIEW_CONTEXT_BUDGET)
-            response = self._client.call(
-                tier=tier,
-                prompt=prompt,
-                system=self._system_prompt,
-                max_tokens=_REVIEW_MAX_TOKENS,
+            response, prompt, remaining_budget = self._call_with_context_requests(
+                tier, prompt, remaining_budget
             )
+
             try:
                 output = self._validator.validate(response.content, AgentRole.CODE_REVIEWER_AGENT)
                 assert isinstance(output, ReviewAgentOutput)
@@ -83,7 +96,75 @@ class ReviewAgent:
             suggestions=["Manual review required."],
         )
 
-    # ── private helpers ───────────────────────────────────────────────────────
+    # ── context-request loop ──────────────────────────────────────────────────
+
+    def _call_with_context_requests(
+        self, tier: Tier, prompt: str, remaining_budget: int,
+    ) -> tuple[ModelResponse, str, int]:
+        """Calls the model, honoring ContextRequest responses until it returns
+        a verdict, the budget runs out, or the round safety valve is hit.
+        """
+        for _ in range(_REVIEW_MAX_CONTEXT_ROUNDS):
+            response = self._client.call(
+                tier=tier, prompt=prompt, system=self._system_prompt, max_tokens=_REVIEW_MAX_TOKENS,
+            )
+            request = self._try_parse_context_request(response.content)
+            if request is None:
+                return response, prompt, remaining_budget
+
+            if remaining_budget <= 0:
+                prompt = (
+                    f"{prompt}\n\n## Context budget exhausted\n"
+                    "You must return a verdict now — no more files can be read."
+                )
+                response = self._client.call(
+                    tier=tier, prompt=prompt, system=self._system_prompt, max_tokens=_REVIEW_MAX_TOKENS,
+                )
+                return response, prompt, remaining_budget
+
+            content_block, tokens_used = self._read_requested_file(request.path, remaining_budget)
+            prompt = (
+                f"{prompt}\n\n## Additional Context Requested: {request.path}\n"
+                f"Reason given: {request.reason}\n\n```\n{content_block}\n```"
+            )
+            remaining_budget -= tokens_used
+
+        prompt = f"{prompt}\n\n## Context request limit reached\nYou must return a verdict now."
+        response = self._client.call(
+            tier=tier, prompt=prompt, system=self._system_prompt, max_tokens=_REVIEW_MAX_TOKENS,
+        )
+        return response, prompt, remaining_budget
+
+    @staticmethod
+    def _try_parse_context_request(raw: str) -> ContextRequest | None:
+        json_str = OutputValidator.extract_json(raw)
+        if json_str is None:
+            return None
+        try:
+            return ContextRequest.model_validate_json(json_str)
+        except (ValidationError, ValueError):
+            return None
+
+    def _read_requested_file(self, path: str, remaining_budget: int) -> tuple[str, int]:
+        """Returns (content or error text to show the reviewer, tokens consumed)."""
+        safe = resolve_within_root(path, self._root)
+        if safe is None:
+            return f"Access denied: {path!r} is outside the project repo.", 0
+        if not safe.is_file():
+            return f"File not found: {path}", 0
+
+        text = safe.read_text(encoding="utf-8")
+        tokens = TokenCounter.estimate(text)
+        if tokens > remaining_budget:
+            char_budget = remaining_budget * 4
+            text = (
+                f"{text[:char_budget]}\n"
+                f"... [truncated: {tokens} tokens total, budget allows ~{remaining_budget}]"
+            )
+            tokens = remaining_budget
+        return text, tokens
+
+    # ── prompt building ───────────────────────────────────────────────────────
 
     def _build_prompt(
         self,
@@ -126,7 +207,12 @@ class ReviewAgent:
             '\n\nReturn your verdict as a JSON object:\n'
             '{"passed": bool, "uncertain": bool, "findings": [...], "summary": "..."}\n'
             "Set uncertain=true (and passed=false) only if you genuinely cannot determine "
-            "correctness without additional context."
+            "correctness without additional context.\n\n"
+            "If you need to verify a specific behavioral or architectural claim that isn't covered "
+            "by the Code Context above — for example, confirming what a referenced function or "
+            "callback actually receives — you may instead respond with:\n"
+            '{"action": "request_file", "path": "repo/relative/path.py", "reason": "..."}\n'
+            "Only request files you can identify from imports or references already visible above."
         )
 
         return "\n".join(parts)
@@ -142,4 +228,5 @@ class ReviewAgent:
             reason=output.summary,
             suggestions=suggestions,
             uncertain=output.uncertain,
+            infeasible=output.infeasible,
         )

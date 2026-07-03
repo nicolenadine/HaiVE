@@ -89,6 +89,10 @@ def make_failing_review(suggestions: list[str] | None = None) -> ReviewVerdict:
     )
 
 
+def make_infeasible_review(reason: str = "Callback structurally never receives this data.") -> ReviewVerdict:
+    return ReviewVerdict(passed=False, infeasible=True, reason=reason, suggestions=[])
+
+
 def make_discovery_result(*, has_sections: bool = False) -> DiscoveryResult:
     sections = (
         [DiscoveredSection(file="haive/client.py", symbol=None, start_line=None, end_line=None, full=True, reason="Core.")]
@@ -302,6 +306,31 @@ class TestTierEscalation:
         svc["pm"].add_comment.assert_called_once()
         assert record.verdict is None
         assert record.total_attempts == 3  # 1 per tier
+
+    def test_infeasible_verdict_stops_immediately_without_escalation(self, tmp_path):
+        executor = make_executor(tmp_path, low_attempts=2, medium_attempts=2)
+        svc = make_services(tmp_path)
+
+        executor._tier_config.high = make_tier(max_attempts=2)
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_infeasible_review(
+            "on_task_complete never receives blocked-status records."
+        )
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+
+        record = executor.run(make_task(complexity=Complexity.LOW), **svc)
+
+        assert executor._model_client.call.call_count == 1
+        assert executor._review_agent.review.call_count == 1
+        svc["pm"].update_status.assert_called_with("42", TaskStatus.NEEDS_HUMAN_REVIEW)
+        svc["pm"].add_comment.assert_called_once()
+        comment = svc["pm"].add_comment.call_args.args[1]
+        assert "architecturally infeasible" in comment
+        assert "on_task_complete never receives blocked-status records." in comment
+        assert record.total_attempts == 1
+        assert record.verdict is not None
+        assert record.verdict.infeasible is True
 
     def test_starts_at_task_complexity_not_low(self, tmp_path):
         executor = make_executor(tmp_path, medium_attempts=1)

@@ -55,6 +55,14 @@ class ReviewAgentOutput(BaseModel):
         default=False,
         description="True when the reviewer cannot determine correctness. Mutually exclusive with passed=True.",
     )
+    infeasible: bool = Field(
+        default=False,
+        description=(
+            "True when the acceptance criteria are architecturally unsatisfiable given the "
+            "real code — not an implementation mistake. Mutually exclusive with passed=True "
+            "and uncertain=True."
+        ),
+    )
     findings: list[ReviewFinding] = Field(
         default_factory=list,
         description="Issues found. Empty when passed=True.",
@@ -65,6 +73,10 @@ class ReviewAgentOutput(BaseModel):
     def uncertain_and_passed_are_exclusive(self) -> "ReviewAgentOutput":
         if self.uncertain and self.passed:
             raise ValueError("uncertain=True and passed=True are mutually exclusive.")
+        if self.infeasible and self.passed:
+            raise ValueError("infeasible=True and passed=True are mutually exclusive.")
+        if self.infeasible and self.uncertain:
+            raise ValueError("infeasible=True and uncertain=True are mutually exclusive.")
         return self
 
 

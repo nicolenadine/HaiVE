@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -46,12 +47,16 @@ class TaskExecutor:
         review_agent: ReviewAgent,
         root: str,
         project_branch: str,
+        auto_merge: bool = True,
+        on_status: Callable[[str], None] | None = None,
     ) -> None:
         self._model_client = model_client
         self._tier_config = tier_config
         self._review_agent = review_agent
         self._root = root
         self._project_branch = project_branch
+        self._auto_merge = auto_merge
+        self._on_status = on_status or (lambda _: None)
         self._validator = OutputValidator()
         self._assembler = ContextAssembler()
 
@@ -105,12 +110,17 @@ class TaskExecutor:
         system_prompt = Path(self._root, agent_config.system_prompt).read_text(encoding="utf-8")
         dependency_outputs = self._build_dependency_outputs(task, project_state)
         task_branch = f"haive/task-{task.task_id}"
+
+        self._on_status(f"  [#{task.task_id}] {task.title}  [{task.agent_role.value} / {task.complexity.value}]")
+        self._on_status(f"  [#{task.task_id}] creating branch {task_branch}")
         vcs.create_branch(task_branch, self._project_branch)
 
         for complexity, tier in self._get_tier_ladder(task.complexity):
             token_budget = int(tier.context_budget * agent_config.context_budget_multiplier)
+            self._on_status(f"  [#{task.task_id}] discovering context  [tier={complexity.value}, budget={token_budget:,}]")
             discovery_result = discovery_agent.discover(task, self._root, token_budget)
             loaded_sections = file_index.load_sections(discovery_result, self._root, token_budget)
+            self._on_status(f"  [#{task.task_id}] loaded {len(loaded_sections)} section(s)")
             discovery_status = self._compute_discovery_status(discovery_result, task.agent_role)
             discovery_note = (
                 "No existing code found for this task."
@@ -128,6 +138,7 @@ class TaskExecutor:
                     retry_feedback=retry_feedback or None,
                 )
 
+                self._on_status(f"  [#{task.task_id}] LLM call  [attempt={attempt_num + 1}, tier={complexity.value}]")
                 try:
                     response = self._model_client.call(
                         tier, context, system_prompt, agent_config.max_tokens
@@ -135,6 +146,7 @@ class TaskExecutor:
                     consecutive_api_errors = 0
                 except APIError as exc:
                     consecutive_api_errors += 1
+                    self._on_status(f"  [#{task.task_id}] API error (attempt not counted): {exc}")
                     record.attempt_log.append(
                         AttemptLogEntry(
                             tier=complexity,
@@ -151,6 +163,7 @@ class TaskExecutor:
                 try:
                     agent_output = self._validator.validate(response.content, task.agent_role)
                 except OutputValidationError as exc:
+                    self._on_status(f"  [#{task.task_id}] schema validation failed — retrying")
                     record.attempt_log.append(
                         AttemptLogEntry(
                             tier=complexity,
@@ -161,6 +174,7 @@ class TaskExecutor:
                     retry_feedback = [str(exc)]
                     continue
 
+                self._on_status(f"  [#{task.task_id}] reviewing output  [{response.model_used}]")
                 verdict = self._review_agent.review(
                     task=task,
                     agent_output=agent_output,
@@ -170,6 +184,7 @@ class TaskExecutor:
                 )
 
                 if verdict.passed:
+                    self._on_status(f"  [#{task.task_id}] review passed — applying output")
                     return self._finalize_success(
                         task=task,
                         project_id=project_id,
@@ -187,6 +202,27 @@ class TaskExecutor:
                         state_store=state_store,
                     )
 
+                if verdict.infeasible:
+                    self._on_status(f"  [#{task.task_id}] acceptance criteria infeasible — {verdict.reason}")
+                    record.attempt_log.append(
+                        AttemptLogEntry(
+                            tier=complexity,
+                            attempt=attempt_num,
+                            reason=verdict.reason,
+                        )
+                    )
+                    record.verdict = verdict.to_summary()
+                    pm.add_comment(task.task_id, _format_infeasible_summary(verdict.reason))
+                    pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
+                    record.total_attempts = attempt_num
+                    record.executor_end = _utcnow()
+                    state_store.merge_task_record(project_id, task.task_id, record)
+                    return record
+
+                self._on_status(f"  [#{task.task_id}] review failed — {verdict.reason}")
+                if verdict.suggestions:
+                    for suggestion in verdict.suggestions:
+                        self._on_status(f"  [#{task.task_id}]   suggestion: {suggestion}")
                 record.attempt_log.append(
                     AttemptLogEntry(
                         tier=complexity,
@@ -197,6 +233,7 @@ class TaskExecutor:
                 retry_feedback = verdict.suggestions
 
         # All tiers exhausted
+        self._on_status(f"  [#{task.task_id}] all tiers exhausted — needs human review")
         pm.add_comment(task.task_id, _format_attempt_summary(record.attempt_log))
         pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
         record.total_attempts = attempt_num
@@ -225,6 +262,7 @@ class TaskExecutor:
     ) -> TaskExecutionRecord:
         _apply_output(agent_output, self._root)
         changed_files = get_changed_files(self._root)
+        self._on_status(f"  [#{task.task_id}] pushing {len(changed_files)} file(s): {', '.join(changed_files)}")
         vcs.push_commits(
             task_branch,
             changed_files,
@@ -236,8 +274,10 @@ class TaskExecutor:
             task_branch,
             self._project_branch,
         )
+        self._on_status(f"  [#{task.task_id}] PR created: #{pr_id}" + ("" if self._auto_merge else " (not auto-merged)"))
         vcs.add_pr_comment(pr_id, _format_pr_comment(record.attempt_log, verdict))
-        vcs.merge_pr(pr_id)
+        if self._auto_merge:
+            vcs.merge_pr(pr_id)
         pm.update_status(task.task_id, TaskStatus.COMPLETE)
         file_index.update_after_task(changed_files, self._root)
 
@@ -308,6 +348,16 @@ def _format_attempt_summary(attempt_log: list[AttemptLogEntry]) -> str:
     for entry in attempt_log:
         lines.append(f"- Tier {entry.tier.value}, attempt {entry.attempt}: {entry.reason}")
     return "\n".join(lines)
+
+
+def _format_infeasible_summary(reason: str) -> str:
+    return (
+        "**haive: acceptance criteria are architecturally infeasible**\n\n"
+        "The reviewer determined this task's acceptance criteria cannot be satisfied by any "
+        "implementation, given the current code architecture — this is not an implementation "
+        "mistake. The task's scope or acceptance criteria need to be revised.\n\n"
+        f"Reviewer's reasoning: {reason}"
+    )
 
 
 def _format_pr_comment(

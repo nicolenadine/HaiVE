@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 from pydantic import ValidationError
 
 from haive.discovery.code_discovery_prompt import CODE_DISCOVERY_SYSTEM_PROMPT
 from haive.discovery.constants import CODE_DISCOVERY_MAX_TOKENS, CODE_DISCOVERY_MAX_TOOL_CALLS
+from haive.discovery.path_safety import resolve_within_root
 from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
@@ -154,19 +154,8 @@ class CodeDiscoveryAgent:
             return self._list_subdirectories(arguments.get("directory", "."), root)
         return f"Unknown tool: {name}"
 
-    @staticmethod
-    def _resolve_within_root(directory: str, root: str) -> Path | None:
-        """Return the resolved path only if it stays inside root; None otherwise."""
-        root_resolved = Path(root).resolve()
-        candidate = (root_resolved / directory).resolve()
-        try:
-            candidate.relative_to(root_resolved)
-            return candidate
-        except ValueError:
-            return None
-
     def _read_agent_md(self, directory: str, root: str) -> str:
-        safe = self._resolve_within_root(directory, root)
+        safe = resolve_within_root(directory, root)
         if safe is None:
             return f"Access denied: {directory!r} is outside the project repo"
         path = safe / "agent.md"
@@ -175,7 +164,7 @@ class CodeDiscoveryAgent:
         return path.read_text(encoding="utf-8")
 
     def _list_subdirectories(self, directory: str, root: str) -> str:
-        safe = self._resolve_within_root(directory, root)
+        safe = resolve_within_root(directory, root)
         if safe is None:
             return f"Access denied: {directory!r} is outside the project repo"
         if not safe.is_dir():

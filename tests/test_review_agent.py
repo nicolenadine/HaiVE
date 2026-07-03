@@ -46,8 +46,8 @@ def make_response(payload: dict) -> ModelResponse:
     return ModelResponse(content=json.dumps(payload), model_used="mock", token_usage=None)
 
 
-def make_agent(client: ModelClient) -> ReviewAgent:
-    return ReviewAgent(client, SYSTEM_PROMPT, GUIDELINES)
+def make_agent(client: ModelClient, root: str = "/tmp") -> ReviewAgent:
+    return ReviewAgent(client, SYSTEM_PROMPT, GUIDELINES, root)
 
 
 PASSING_PAYLOAD = {"passed": True, "uncertain": False, "findings": [], "summary": "LGTM"}
@@ -112,6 +112,18 @@ class TestModelEscalation:
         client.call.side_effect = [make_response(UNCERTAIN_PAYLOAD)] * len(REVIEWER_MODELS)
         verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
         assert verdict.uncertain is False
+
+    def test_infeasible_does_not_advance_to_next_model(self):
+        client = MagicMock(spec=ModelClient)
+        infeasible_payload = {
+            "passed": False, "infeasible": True, "uncertain": False,
+            "findings": [], "summary": "architecturally impossible",
+        }
+        client.call.return_value = make_response(infeasible_payload)
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        assert client.call.call_count == 1
+        assert verdict.infeasible is True
+        assert verdict.passed is False
 
     def test_parse_failure_advances_to_next_model(self):
         client = MagicMock(spec=ModelClient)
@@ -203,6 +215,24 @@ class TestReviewVerdict:
         verdict = ReviewVerdict(passed=True, reason="LGTM", suggestions=[])
         assert verdict.passed is True
 
+    def test_infeasible_and_passed_raises(self):
+        with pytest.raises(Exception):
+            ReviewVerdict(passed=True, reason="ok", infeasible=True)
+
+    def test_infeasible_and_uncertain_raises(self):
+        with pytest.raises(Exception):
+            ReviewVerdict(passed=False, reason="ok", uncertain=True, infeasible=True)
+
+    def test_infeasible_allows_empty_suggestions(self):
+        verdict = ReviewVerdict(passed=False, reason="architecturally impossible", infeasible=True, suggestions=[])
+        assert verdict.infeasible is True
+        assert verdict.suggestions == []
+
+    def test_to_summary_carries_infeasible(self):
+        verdict = ReviewVerdict(passed=False, reason="architecturally impossible", infeasible=True)
+        summary = verdict.to_summary()
+        assert summary.infeasible is True
+
 
 # ── ReviewAgentOutput schema ──────────────────────────────────────────────────
 
@@ -216,3 +246,87 @@ class TestReviewAgentOutputSchema:
         from haive.models.agent_output import ReviewAgentOutput
         output = ReviewAgentOutput(passed=False, uncertain=True, findings=[], summary="?")
         assert output.uncertain is True
+
+    def test_infeasible_true_and_passed_true_raises(self):
+        from haive.models.agent_output import ReviewAgentOutput
+        with pytest.raises(Exception):
+            ReviewAgentOutput(passed=True, infeasible=True, findings=[], summary="?")
+
+    def test_infeasible_true_and_uncertain_true_raises(self):
+        from haive.models.agent_output import ReviewAgentOutput
+        with pytest.raises(Exception):
+            ReviewAgentOutput(passed=False, uncertain=True, infeasible=True, findings=[], summary="?")
+
+    def test_infeasible_true_passed_false_is_valid(self):
+        from haive.models.agent_output import ReviewAgentOutput
+        output = ReviewAgentOutput(passed=False, infeasible=True, findings=[], summary="?")
+        assert output.infeasible is True
+
+
+# ── context requests ──────────────────────────────────────────────────────────
+
+CONTEXT_REQUEST_PAYLOAD = {"action": "request_file", "path": "extra.py", "reason": "check the caller"}
+
+
+class TestContextRequests:
+    def test_no_request_matches_existing_single_call_behavior(self):
+        client = MagicMock(spec=ModelClient)
+        client.call.return_value = make_response(PASSING_PAYLOAD)
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        assert client.call.call_count == 1
+        assert verdict.passed is True
+
+    def test_round_trip_reads_file_and_returns_verdict(self, tmp_path):
+        (tmp_path / "extra.py").write_text("def caller(): pass")
+        client = MagicMock(spec=ModelClient)
+        client.call.side_effect = [
+            make_response(CONTEXT_REQUEST_PAYLOAD),
+            make_response(PASSING_PAYLOAD),
+        ]
+        verdict = make_agent(client, root=str(tmp_path)).review(
+            make_task(), make_agent_output(), [], "found", ""
+        )
+        assert client.call.call_count == 2
+        assert verdict.passed is True
+        second_prompt = client.call.call_args_list[1].kwargs["prompt"]
+        assert "def caller(): pass" in second_prompt
+
+    def test_path_traversal_is_denied_without_raising(self, tmp_path):
+        client = MagicMock(spec=ModelClient)
+        client.call.side_effect = [
+            make_response({"action": "request_file", "path": "../../etc/passwd", "reason": "x"}),
+            make_response(PASSING_PAYLOAD),
+        ]
+        verdict = make_agent(client, root=str(tmp_path)).review(
+            make_task(), make_agent_output(), [], "found", ""
+        )
+        assert client.call.call_count == 2
+        second_prompt = client.call.call_args_list[1].kwargs["prompt"]
+        assert "Access denied" in second_prompt
+        assert verdict.passed is True
+
+    def test_budget_exhaustion_forces_final_verdict(self, tmp_path):
+        (tmp_path / "big.py").write_text("x" * 200_000)  # far exceeds the token budget
+        client = MagicMock(spec=ModelClient)
+        client.call.side_effect = [
+            make_response({"action": "request_file", "path": "big.py", "reason": "first"}),
+            make_response({"action": "request_file", "path": "big.py", "reason": "second"}),
+            make_response(PASSING_PAYLOAD),
+        ]
+        verdict = make_agent(client, root=str(tmp_path)).review(
+            make_task(), make_agent_output(), [], "found", ""
+        )
+        assert client.call.call_count == 3
+        assert verdict.passed is True
+        exhausted_prompt = client.call.call_args_list[2].kwargs["prompt"]
+        assert "budget exhausted" in exhausted_prompt.lower()
+
+    def test_escalation_still_advances_on_uncertain_with_new_signature(self):
+        client = MagicMock(spec=ModelClient)
+        client.call.side_effect = [
+            make_response(UNCERTAIN_PAYLOAD),
+            make_response(PASSING_PAYLOAD),
+        ]
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        assert client.call.call_count == 2
+        assert verdict.passed is True

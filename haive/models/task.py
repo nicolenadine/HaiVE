@@ -41,6 +41,7 @@ class AttemptLogEntry(BaseModel):
 class VerdictSummary(BaseModel):
     passed: bool
     reason: str
+    infeasible: bool = False
 
 
 class TokenUsage(BaseModel):
