@@ -12,6 +12,7 @@ from haive.discovery.constants import (
     ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET,
     SOURCE_EXTENSIONS,
 )
+from haive.discovery.symbol_line_corrector import correct_line_ranges
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
 from haive.llm.token_counter import TokenCounter
@@ -225,6 +226,8 @@ class FileIndexService:
                 f"Last violations: {violations}"
             )
 
+        content = correct_line_ranges(content, dir_path)
+
         Path(os.path.join(dir_path, "agent.md")).write_text(
             content + "\n", encoding="utf-8"
         )
@@ -282,6 +285,8 @@ class FileIndexService:
                 f"{AGENT_MD_MAX_GENERATION_RETRIES} attempts. "
                 f"Last violations: {violations}"
             )
+
+        content = correct_line_ranges(content, dir_path)
 
         Path(os.path.join(dir_path, "agent.md")).write_text(
             content + "\n", encoding="utf-8"

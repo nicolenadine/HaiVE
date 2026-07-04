@@ -1,12 +1,12 @@
 ## Files
 
-api_integration_agent.md — Role definition for integrating external APIs with adapters and data mapping
-code_editor_agent.md — Role definition for making targeted, precise edits to existing code files
-code_reviewer_agent.md — Role definition for evaluating code submissions against acceptance criteria and guidelines
-database_agent.md — Role definition for writing database schemas, migrations, and query code
-documentation_writer_agent.md — Role definition for writing technical documentation and docstrings
-implementation_agent.md — Role definition for writing production-quality code from specifications
-refactoring_agent.md — Role definition for improving code structure, clarity, and testability
-scaffold_agent.md — Role definition for creating project structure and boilerplate files from scratch
-security_reviewer_agent.md — Role definition for evaluating code submissions for security vulnerabilities
-test_generator_agent.md — Role definition for writing unit, integration, and end-to-end tests
+api_integration_agent.md — Integrates external APIs with HTTP clients, adapters, and data-mapping code
+code_editor_agent.md — Makes targeted, precise edits to existing code files
+code_reviewer_agent.md — Evaluates code submissions against acceptance criteria and coding guidelines
+database_agent.md — Writes database schemas, migrations, models, and safe query code
+documentation_writer_agent.md — Writes docstrings, README sections, and usage examples
+implementation_agent.md — Writes production-quality code that implements features from specifications
+refactoring_agent.md — Improves code structure, clarity, and testability without changing behavior
+scaffold_agent.md — Creates project structure, directories, and boilerplate files from scratch
+security_reviewer_agent.md — Evaluates code for security vulnerabilities and sensitive data exposure
+test_generator_agent.md — Writes unit, integration, and end-to-end tests for modules and features

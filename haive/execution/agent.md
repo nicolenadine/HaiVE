@@ -1,12 +1,12 @@
 ## Files
 
-__init__.py — Package initialization for execution module
-context_assembler.py — Builds user-facing context prompts from task, code sections, dependencies, and feedback
-  ContextAssembler (class) — 11-100 — Assembles task description, relevant code, dependencies, and retry feedback into a single prompt
-output_validator.py — Validates raw LLM output against agent-specific JSON schemas
-  OutputValidationError (class) — 8-16 — Raised when agent output fails parsing or schema validation
-  OutputValidator (class) — 48-99 — Extracts and validates JSON output against role-specific Pydantic schemas
-review_agent.py — LLM-as-judge evaluating task output against acceptance criteria with optional context expansion
-  ReviewAgent (class) — 27-285 — Iterates through reviewer models, validates output, handles dynamic file requests
-task_executor.py — Orchestrates full task execution: discovery, LLM calls, review, and PR creation
-  TaskExecutor (class) — 40-324 — Executes task end-to-end with retry logic across complexity tiers
+__init__.py — Module exports for execution orchestration
+context_assembler.py — Builds user-facing context prompts from discovered code and task details
+  ContextAssembler (class) — 9-97 — Assembles task description, code context, dependency outputs, and retry feedback into a complete prompt
+output_validator.py — Validates and extracts JSON output from LLM responses against agent schemas
+  OutputValidator (class) — 46-88 — Extracts and validates JSON from raw LLM output against registered agent role schemas
+  OutputValidationError (class) — 21-27 — Exception raised when agent output cannot be parsed or validated
+review_agent.py — LLM-as-judge for evaluating task agent output against acceptance criteria
+  ReviewAgent (class) — 36-232 — Reviews agent output with model escalation and on-demand file context requests
+task_executor.py — End-to-end task execution orchestration from discovery through PR merge
+  TaskExecutor (class) — 37-330 — Executes tasks with tier ladder, context discovery, validation, and review loop

@@ -1,21 +1,21 @@
 ## Files
 
-agentic_turn.py — Agentic tool calls and turn completion structures
-  ToolCall (class) — 8-11 — LLM-assigned tool invocation with ID, name, and arguments
-  AgenticTurn (class) — 14-17 — Response turn containing tool calls and/or final content
-errors.py — API error exceptions
-  APIError (class) — 1-1 — Base exception for LLM API failures
-model_client.py — LiteLLM-based model client with completion and agentic turn support
-  ModelClient (class) — 17-119 — Wrapper around LiteLLM with single and streaming completions
-  call (method) — 24-56 — Executes a model call with fallback support
-  call_single (method) — 58-119 — Single LiteLLM call with optional tool use
-model_response.py — Model response structure with token usage tracking
-  ModelResponse (class) — 6-9 — Response from LLM containing content, model, and token counts
-tier.py — Model tier configuration with attempt and context limits
-  Tier (class) — 4-12 — Dataclass representing a model tier with validation
-tier_config.py — Multi-tier LLM configuration management
-  TierConfig (class) — 9-53 — Manages five tiers (low, medium, high, orchestrator, reviewer)
-  from_settings (method) — 12-35 — Constructs TierConfig from application settings
-  for_complexity (method) — 37-43 — Retrieves tier matching a task complexity level
+agentic_turn.py — Tool invocation and agentic loop response structures
+  AgenticTurn (class) — 14-17 — Represents LLM response with optional tool calls and final content
+  ToolCall (class) — 7-10 — Single tool invocation with ID, name, and parsed arguments
+errors.py — Exception definitions for LLM API failures
+  APIError (class) — 1-2 — Exception for LiteLLM API call failures
+model_client.py — LiteLLM wrapper providing completion and agentic calls
+  ModelClient (class) — 27-120 — Manages LLM interactions with fallback models and token tracking
+  call (method) — 35-70 — Single completion call with fallback models and token tracking
+  call_single (method) — 72-120 — Agentic call supporting tool invocations and structured responses
+model_response.py — Response dataclass for LLM completion calls
+  ModelResponse (class) — 9-12 — Encapsulates content, model name, and optional token usage
+tier.py — Model tier configuration with constraints
+  Tier (class) — 5-16 — Specifies models, retry limits, and context budget for a tier
+tier_config.py — Multi-tier LLM configuration factory
+  TierConfig (class) — 14-58 — Container for five model tiers mapped to task complexity
+  from_settings (method) — 22-49 — Factory constructing tiers from application settings
+  for_complexity (method) — 51-58 — Select tier by task complexity level
 token_counter.py — Token estimation utility
-  TokenCounter (class) — 4-5 — Estimates token count by dividing text length by 4
+  TokenCounter (class) — 4-7 — Static utility for estimating token count from text length

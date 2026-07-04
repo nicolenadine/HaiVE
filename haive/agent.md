@@ -1,18 +1,24 @@
 ## Files
 
-__init__.py — Package initialization (empty)
-cli.py — Command-line interface for haive agent harness with config, indexing, discovery, and execution commands
-  index (function) — 206-258 — Generates or validates per-directory agent.md index files
-  discover (function) — 261-319 — Runs Code Discovery Agent to find relevant code sections for a task
-  load (function) — 322-401 — Discovers relevant files and loads their full source content with token budget
-  run (function) — 404-637 — Executes haive agent harness wave for a project milestone with orchestration and task execution
-adapters/ — Project management and version control system adapters with GitHub integration
-config/ — Configuration management across named profiles with .env support
-discovery/ — Code discovery agent and agent.md file indexing with LLM-based generation and validation
-execution/ — Task execution orchestration with LLM calls, output validation, code review, and PR workflows
-llm/ — LiteLLM-based model client with multi-tier configuration and agentic tool calling support
-models/ — Pydantic domain models for tasks, projects, agents, state, and workflow enumerations
-observability/ — OpenTelemetry and LiteLLM instrumentation for distributed tracing
-orchestration/ — Task planning orchestrator with example library, scheduler, and dependency management
-persistence/ — Thread-safe state persistence layer with locking and schema versioning
-registry/ — Agent configuration registry for managing YAML-based agent definitions and skills
+__init__.py — Package initialization for haive
+cli.py — CLI entry point with commands for indexing, discovering, loading, and running the harness
+  config_create (function) — 18-25 — Create a new named configuration
+  config_use (function) — 29-36 — Activate a named configuration
+  config_set (function) — 40-50 — Set a KEY=VALUE in the active configuration
+  config_edit (function) — 54-56 — Open the active config in $EDITOR or nano
+  config_show (function) — 60-67 — Display the active config with sensitive values masked
+  config_list (function) — 71-80 — List all named configs with active marked by *
+  index (function) — 151-202 — Generate or validate per-directory agent.md index files
+  discover (function) — 208-269 — Run Code Discovery Agent to find relevant files for a task
+  load (function) — 275-341 — Discover relevant files and load their source content
+  run (function) — 347-595 — Execute haive harness for a project milestone across waves
+adapters/ — Project management and version control adapter interfaces for PM and VCS platforms
+config/ — Configuration management for named environments with validation and editing
+discovery/ — Agent.md indexing, code discovery navigation, and file content loading services
+execution/ — Task execution orchestration with context assembly, validation, and review loop
+llm/ — LLM client wrapper with multi-tier configuration, token counting, and agentic loops
+models/ — Pydantic domain models for tasks, state, orchestration, output schemas, and enums
+observability/ — OpenTelemetry tracing setup and span context managers for distributed tracing
+orchestration/ — Milestone decomposition orchestrator with example-based guidance and task scheduling
+persistence/ — Filesystem-based project state storage with file locking and atomic writes
+registry/ — Agent configuration registry loaded from YAML with per-role lookup

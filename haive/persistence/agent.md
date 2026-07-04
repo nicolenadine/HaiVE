@@ -1,7 +1,8 @@
 ## Files
 
-state_store.py — Thread-safe persistence layer for project state with schema version validation
-  StateStore (class) — 13-70 — Manages serialization and locking of ProjectState snapshots
-  load_or_init (method) — 29-43 — Loads ProjectState from disk or initializes new state
-  save (method) — 45-48 — Persists ProjectState with file locking
-  merge_task_record (method) — 50-62 — Atomically merges a task execution record into state
+state_store.py — FileSystem-based persistence layer for project state with file locking
+  StateStore (class) — 15-70 — Manages loading, saving, and merging task execution records to disk
+  load_or_init (method) — 29-46 — Loads existing ProjectState or initializes new one with schema validation
+  save (method) — 48-50 — Atomically persists ProjectState to disk with locking
+  merge_task_record (method) — 52-64 — Merges a task execution record into project state
+__init__.py — Package initializer

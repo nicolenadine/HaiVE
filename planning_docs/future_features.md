@@ -82,6 +82,17 @@ conservative while the infeasible-verdict auto-recovery and orchestrator repo-ma
 new and unproven. Raise this once a track record of correct automatic recoveries builds up
 confidence that a stalled or misbehaving loop won't silently burn many waves of tokens.
 
+### Symbol line-range correction for non-Python languages
+`haive/discovery/symbol_line_corrector.py` (see `build_plan.md`'s H1) only corrects
+Python files, using the stdlib `ast` module for exact, no-guessing line ranges. Other
+languages `SOURCE_EXTENSIONS` supports (JS/TS, Go, Java, Ruby, Rust, C/C++, C#, Swift)
+still rely on the LLM's estimate, same as before this fix — not worse, just not improved.
+Extending this would need either a per-language parser (tree-sitter — a new dependency,
+and one that would need real non-Python source in this repo to validate against) or a
+simpler regex-plus-brace-depth-counting heuristic per language. Deferred until haive is
+actually run against a non-Python project, so the approach can be validated against real
+code rather than built speculatively.
+
 ---
 
 ## GitHub Native Issue Relationships

@@ -107,6 +107,21 @@ class TestGenerateAll:
 
         assert mock_client.call_single.call_count == AGENT_MD_MAX_GENERATION_RETRIES
 
+    def test_generate_all_corrects_wrong_symbol_line_range(self, service, mock_client, tmp_path):
+        source = "\n".join(["# padding"] * 10 + ["def real_function():", "    pass"])
+        (tmp_path / "task.py").write_text(source)
+        wrong_agent_md = (
+            "## Files\n\n"
+            "task.py — Task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+        mock_client.call_single.return_value = make_turn(wrong_agent_md)
+
+        service.generate_all(str(tmp_path))
+
+        content = (tmp_path / "agent.md").read_text()
+        assert "real_function (function) — 11-12" in content
+
     def test_gitignore_excluded_directory_receives_no_agent_md(
         self, service, mock_client, tmp_path
     ):
@@ -444,6 +459,23 @@ class TestUpdateAfterTask:
         written = (tmp_path / "agent.md").read_text()
         assert "Updated task model" in written
         assert "state.py — State model" in written
+
+    def test_update_after_task_corrects_wrong_symbol_line_range(self, tmp_path):
+        mock_client = MagicMock()
+        source = "\n".join(["# padding"] * 10 + ["def real_function():", "    pass"])
+        mock_client.call_single.return_value = make_turn(
+            "## Files\n\ntask.py — Updated task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+        service = FileIndexService(mock_client, MagicMock(spec=Tier))
+
+        (tmp_path / "task.py").write_text(source)
+        (tmp_path / "agent.md").write_text("## Files\n\ntask.py — Old task module\n")
+
+        service.update_after_task(["task.py"], str(tmp_path))
+
+        written = (tmp_path / "agent.md").read_text()
+        assert "real_function (function) — 11-12" in written
 
     def test_deleted_file_strips_entry_without_llm(self, tmp_path):
         mock_client = MagicMock()

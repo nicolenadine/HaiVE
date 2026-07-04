@@ -1,7 +1,8 @@
 ## Files
 
-__init__.py — Package initialization file for VCS adapters
-base.py — VCSAdapter protocol defining version control system interface
-  VCSAdapter (class) — 4-12 — Protocol for VCS operations including branch, PR, and merge management
-github.py — GitHub implementation of VCS adapter using PyGithub and GraphQL
-  GitHubVCSAdapter (class) — 12-98 — Concrete GitHub adapter for branch creation, PR management, and automated merging
+base.py — VCSAdapter protocol defining common version control operations interface
+  VCSAdapter (class) — 4-10 — Protocol for VCS implementations with branch, PR, and commit methods
+github.py — GitHub-specific VCS adapter implementation using PyGithub and GraphQL
+  GitHubVCSAdapter (class) — 14-92 — Concrete adapter for GitHub PR and branch operations
+  _graphql (method) — 28-42 — Executes GitHub GraphQL queries with authorization
+__init__.py — Package exports for VCS adapters

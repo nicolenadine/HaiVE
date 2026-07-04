@@ -1,5 +1,5 @@
 ## Files
 
-test_adapter_live.py — Live smoke test for GitHubPMAdapter with CLI flags to validate project board setup
-  _make_settings (function) — 16-21 — Constructs minimal settings namespace for adapter initialization
-  main (function) — 24-99 — Entry point performing startup validation and fetching project/tasks from GitHub
+test_adapter_live.py — Live smoke test for GitHubPMAdapter against a real GitHub repository and Projects v2 board
+  _make_settings (function) — 21-26 — Creates minimal settings namespace with required GitHub credentials and project ID
+  main (function) — 29-88 — Smoke test runner that validates adapter connection, fetches project details, and retrieves tasks from a milestone

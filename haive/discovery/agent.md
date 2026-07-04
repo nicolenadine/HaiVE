@@ -1,27 +1,37 @@
 ## Files
 
-agent_md.py — Validator for agent.md file format and structural rules
-  AgentMdValidator (class) — 12-103 — Validates agent.md against format spec and collects violations
-  validate (method) — 20-41 — Main validation method returning list of violation messages
-agent_md_generation_agent.py — LLM agent that generates agent.md files by reading source code
-  AgentMdGenerationAgent (class) — 46-179 — Reads source files via tool calling then writes agent.md
-  generate (method) — 60-100 — Generate new agent.md by reading all source files in a directory
-  update (method) — 102-141 — Incrementally update existing agent.md for changed files only
-agent_md_generation_prompt.py — System prompt for agent.md generation with format rules and examples
-  AGENT_MD_GENERATION_SYSTEM_PROMPT (constant) — 4-57 — Detailed prompt teaching format rules and providing examples
-code_discovery_agent.py — LLM agent that navigates agent.md tree to find code relevant to tasks
-  CodeDiscoveryAgent (class) — 54-137 — Explores repo via agent.md index to locate relevant files and symbols
-  discover (method) — 64-108 — Navigate agent.md tree and return DiscoveryResult with relevant sections
-code_discovery_prompt.py — System prompt for code discovery agent with tools and exploration strategy
-  CODE_DISCOVERY_SYSTEM_PROMPT (constant) — 1-65 — Detailed prompt with tool definitions and path construction rules
-constants.py — Configuration limits and settings for agent.md generation and discovery
-file_index_service.py — High-level service orchestrating agent.md generation, validation, and discovery
-  FileIndexService (class) — 15-274 — Manages agent.md generation, loading discovered sections, and incremental updates
-  generate_all (method) — 21-30 — Generate agent.md for every source directory bottom-up
-  load_sections (method) — 32-63 — Load source content for discovered sections respecting token budget
-  update_after_task (method) — 65-117 — Incrementally update agent.md for task-affected directories
-  validate_all (method) — 119-131 — Validate all agent.md files under root and return violations by path
-git_utils.py — Git utilities for retrieving changed files in the working tree
-  get_changed_files (function) — 5-26 — Return repo-relative paths of files changed vs HEAD
-path_safety.py — Path safety utilities for repo-relative path resolution
-  resolve_within_root (function) — 5-12 — Resolve path and ensure it stays within repo root boundary
+agent_md.py — Validator for agent.md structural format and content rules
+  AgentMdValidator (class) — 20-123 — Validates agent.md against format spec
+  validate (method) — 27-48 — Check file length, sections, and prose constraints
+agent_md_generation_agent.py — LLM agent that generates agent.md files by reading sources
+  AgentMdGenerationAgent (class) — 124-282 — Orchestrates agent.md generation via read_file tool
+  generate (method) — 136-187 — Generate agent.md for a directory by reading all source files
+  update (method) — 189-244 — Incrementally update agent.md for changed files only
+agent_md_generation_prompt.py — System prompt template for agent.md generation
+  AGENT_MD_GENERATION_SYSTEM_PROMPT (constant) — 3-73 — Instructions for writing agent.md with format rules
+code_discovery_agent.py — LLM agent that navigates agent.md tree to find relevant code
+  CodeDiscoveryAgent (class) — 78-211 — Explores agent.md index files to locate task-relevant files and symbols
+  discover (method) — 91-129 — Navigate repo via agent.md to find files matching a task description
+code_discovery_prompt.py — System prompt template for code discovery navigation
+  CODE_DISCOVERY_SYSTEM_PROMPT (constant) — 1-103 — Instructions for exploring agent.md tree and selecting relevant sections
+constants.py — Configuration limits and guardrails for indexing and discovery
+  AGENT_MD_MAX_LINES (constant) — 4-4 — Maximum total lines per agent.md file
+  AGENT_MD_MIN_DESCRIPTION_LEN (constant) — 7-7 — Minimum description character length
+  AGENT_MD_MAX_DESCRIPTION_LEN (constant) — 8-8 — Maximum description character length
+  AGENT_MD_PROSE_WORD_THRESHOLD (constant) — 11-13 — Word count threshold for prose paragraph detection
+  SOURCE_EXTENSIONS (constant) — 27-54 — File extensions treated as indexable source code
+file_index_service.py — Primary service orchestrating agent.md generation and discovery
+  AgentMdGenerationError (class) — 22-23 — Raised when agent.md generation fails all retries
+  FileIndexService (class) — 26-317 — Manages agent.md generation, discovery, loading, and incremental updates
+  generate_all (method) — 31-41 — Generate agent.md for every source directory bottom-up
+  read_repo_map (method) — 43-72 — Concatenate all agent.md files into a single repo index
+  load_sections (method) — 74-112 — Load source content for discovered sections respecting token budget
+  update_after_task (method) — 114-168 — Incrementally update agent.md for files changed by a task
+git_utils.py — Git operations for tracking file changes
+  get_changed_files (function) — 6-35 — Return repo-relative paths of files changed vs HEAD
+path_safety.py — Safe path resolution preventing directory traversal
+  resolve_within_root (function) — 6-14 — Resolve relative path and validate it stays within root
+symbol_line_corrector.py — AST-based correction of symbol line ranges in agent.md
+  correct_line_ranges (function) — 81-130 — Fix symbol start-end lines using actual Python ast parse results
+  _collect_python_symbols (function) — 26-48 — Extract class/function/method definitions via ast
+  _best_match (function) — 51-66 — Disambiguate symbol names by kind and proximity to guessed line
