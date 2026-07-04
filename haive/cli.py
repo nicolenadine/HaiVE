@@ -553,9 +553,10 @@ def run(
 
                 wave_complete = 0
                 wave_needs_review = 0
+                wave_blocked = 0
 
                 def on_task_complete(record: TaskExecutionRecord) -> None:
-                    nonlocal wave_complete, wave_needs_review
+                    nonlocal wave_complete, wave_needs_review, wave_blocked
                     if record.verdict is not None and record.verdict.passed:
                         wave_complete += 1
                         typer.secho(f"  ✓ Task #{record.task_id} — complete", fg="green")

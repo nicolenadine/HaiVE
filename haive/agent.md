@@ -8,10 +8,15 @@ cli.py — CLI entry point with commands for indexing, discovering, loading, and
   config_edit (function) — 54-56 — Open the active config in $EDITOR or nano
   config_show (function) — 60-67 — Display the active config with sensitive values masked
   config_list (function) — 71-80 — List all named configs with active marked by *
+  _check_git_on_path (function) — 85-91 — Verify git is available on PATH
+  _check_active_config (function) — 94-99 — Validate that an active config can be loaded
+  _resolve_milestone_id (function) — 102-112 — Resolve milestone ID from CLI arg or config
+  _preflight_checks (function) — 115-117 — Run all required preflight checks before main commands
+  _print_dry_run_output (function) — 122-145 — Format and display orchestrator dry-run output
   index (function) — 151-202 — Generate or validate per-directory agent.md index files
   discover (function) — 208-269 — Run Code Discovery Agent to find relevant files for a task
   load (function) — 275-341 — Discover relevant files and load their source content
-  run (function) — 347-595 — Execute haive harness for a project milestone across waves
+  run (function) — 347-598 — Execute haive harness for a project milestone across waves
 adapters/ — Project management and version control adapter interfaces for PM and VCS platforms
 config/ — Configuration management for named environments with validation and editing
 discovery/ — Agent.md indexing, code discovery navigation, and file content loading services
