@@ -428,8 +428,9 @@ def run(
 
         # agent.md preflight check
         if not list(Path(root).rglob("agent.md")):
-            typer.echo(
+            typer.secho(
                 "Error: No agent.md files found. Run 'haive index' first to generate them.",
+                fg="red",
                 err=True,
             )
             raise typer.Exit(code=1)
@@ -469,7 +470,7 @@ def run(
 
         with run_span(milestone_id):
             for wave_num in range(1, settings.max_waves_per_run + 1):
-                typer.echo(f"\n--- Wave {wave_num} ---")
+                typer.secho(f"\n--- Wave {wave_num} ---", bold=True)
                 typer.echo(f"Fetching milestone {milestone_id}...")
                 tasks = pm.get_tasks(milestone_id)
                 typer.echo(f"Found {len(tasks)} existing task(s).")
@@ -557,10 +558,10 @@ def run(
                     nonlocal wave_complete, wave_needs_review
                     if record.verdict is not None and record.verdict.passed:
                         wave_complete += 1
-                        typer.echo(f"  ✓ Task #{record.task_id} — complete")
+                        typer.secho(f"  ✓ Task #{record.task_id} — complete", fg="green")
                     else:
                         wave_needs_review += 1
-                        typer.echo(f"  ✗ Task #{record.task_id} — needs-human-review")
+                        typer.secho(f"  ✗ Task #{record.task_id} — needs-human-review", fg="red")
 
                 def executor_factory(task):  # type: ignore[no-untyped-def]
                     return executor.run(
@@ -575,11 +576,12 @@ def run(
                 final_tasks = pm.get_tasks(milestone_id)
                 wave_blocked = sum(1 for t in final_tasks if t.status == TaskStatus.BLOCKED)
 
-                typer.echo(
+                typer.secho(
                     f"\nWave {wave_num} complete — "
                     f"{wave_complete} complete, "
                     f"{wave_needs_review} needs-human-review, "
-                    f"{wave_blocked} blocked"
+                    f"{wave_blocked} blocked",
+                    bold=True,
                 )
 
             typer.echo(
@@ -588,10 +590,10 @@ def run(
             )
 
     except (RuntimeError, APIError) as e:
-        typer.echo(f"Error: {e}", err=True)
+        typer.secho(f"Error: {e}", fg="red", err=True)
         raise typer.Exit(code=1)
     except ValidationError as e:
-        typer.echo(f"Validation error: {e}", err=True)
+        typer.secho(f"Validation error: {e}", fg="red", err=True)
         raise typer.Exit(code=1)
 
 
