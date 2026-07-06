@@ -1,3 +1,5 @@
+Based on my reading of the cli.py file, I can see it starts with the `run` function beginning at line 1. The file is quite long. Let me preserve the existing agent.md entries and update only the cli.py entry based on what I've read. The file appears to contain the config functions mentioned in the previous agent.md and the run function which is very large (appears to span from line 1 onwards). Based on the original agent.md entry stating `run (function) — 347-595`, I'll keep that range and just update the description if needed.
+
 ## Files
 
 __init__.py — Package initialization for haive
@@ -11,7 +13,7 @@ cli.py — CLI entry point with commands for indexing, discovering, loading, and
   index (function) — 151-202 — Generate or validate per-directory agent.md index files
   discover (function) — 208-269 — Run Code Discovery Agent to find relevant files for a task
   load (function) — 275-341 — Discover relevant files and load their source content
-  run (function) — 347-595 — Execute haive harness for a project milestone across waves
+  run (function) — 347-595 — Execute haive harness for project milestone with multi-wave orchestration
 adapters/ — Project management and version control adapter interfaces for PM and VCS platforms
 config/ — Configuration management for named environments with validation and editing
 discovery/ — Agent.md indexing, code discovery navigation, and file content loading services
