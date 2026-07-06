@@ -372,6 +372,13 @@ def run(
         is_flag=True,
         help="Create task PRs but do not auto-merge them. Leaves PRs open for human review.",
     ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        is_flag=True,
+        help="Suppress routine progress output. Outcome lines still print.",
+    ),
 ) -> None:
     """Run the haive agent harness for a project milestone.
 
@@ -470,10 +477,13 @@ def run(
 
         with run_span(milestone_id):
             for wave_num in range(1, settings.max_waves_per_run + 1):
-                typer.secho(f"\n--- Wave {wave_num} ---", bold=True)
-                typer.echo(f"Fetching milestone {milestone_id}...")
+                if not quiet:
+                    typer.secho(f"\n--- Wave {wave_num} ---", bold=True)
+                if not quiet:
+                    typer.echo(f"Fetching milestone {milestone_id}...")
                 tasks = pm.get_tasks(milestone_id)
-                typer.echo(f"Found {len(tasks)} existing task(s).")
+                if not quiet:
+                    typer.echo(f"Found {len(tasks)} existing task(s).")
 
                 state = state_store.load_or_init(milestone_id)
 
@@ -530,7 +540,8 @@ def run(
                         repo_map=repo_map,
                     )
 
-                    typer.echo("Calling orchestrator...")
+                    if not quiet:
+                        typer.echo("Calling orchestrator...")
                     orchestrator = Orchestrator(model_client, tier_config, settings.max_recovery_depth, example_library)
                     try:
                         output = orchestrator.run_loop(orch_input)
@@ -558,7 +569,8 @@ def run(
                         created = pm.create_task(milestone_id, new_task)
                         id_map[f"new:{i}"] = created.task_id
                         new_task_objects.append(created)
-                        typer.echo(f"  Created task #{created.task_id}: {created.title}")
+                        if not quiet:
+                            typer.echo(f"  Created task #{created.task_id}: {created.title}")
 
                     for i, new_task in enumerate(output.new_tasks):
                         if new_task.depends_on:
@@ -583,13 +595,16 @@ def run(
                     passed = record.verdict is not None and record.verdict.passed
                     if passed and record.merged:
                         wave_complete += 1
-                        typer.secho(f"  ✓ Task #{record.task_id} — complete", fg="green")
+                        if not quiet:
+                            typer.secho(f"  ✓ Task #{record.task_id} — complete", fg="green")
                     elif passed and not record.merged:
                         wave_awaiting_merge += 1
-                        typer.secho(f"  ⏳ Task #{record.task_id} — awaiting merge", fg="yellow")
+                        if not quiet:
+                            typer.secho(f"  ⏳ Task #{record.task_id} — awaiting merge", fg="yellow")
                     else:
                         wave_needs_review += 1
-                        typer.secho(f"  ✗ Task #{record.task_id} — needs-human-review", fg="red")
+                        if not quiet:
+                            typer.secho(f"  ✗ Task #{record.task_id} — needs-human-review", fg="red")
 
                 def executor_factory(task):  # type: ignore[no-untyped-def]
                     return executor.run(
@@ -597,7 +612,8 @@ def run(
                         discovery_agent, file_index, registry, pm, vcs, state_store,
                     )
 
-                typer.echo("\nRunning tasks...")
+                if not quiet:
+                    typer.echo("\nRunning tasks...")
                 scheduler = TaskScheduler()
                 scheduler.start(all_tasks, executor_factory, pm, on_complete=on_task_complete)
 
@@ -605,7 +621,8 @@ def run(
                 blocked_tasks = [t for t in final_tasks if t.status == TaskStatus.BLOCKED]
                 wave_blocked = len(blocked_tasks)
                 for t in blocked_tasks:
-                    typer.secho(f"  ⊘ Task #{t.task_id} — blocked", fg="yellow")
+                    if not quiet:
+                        typer.secho(f"  ⊘ Task #{t.task_id} — blocked", fg="yellow")
 
                 typer.secho(
                     f"\nWave {wave_num} complete — "

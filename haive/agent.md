@@ -1,7 +1,7 @@
 ## Files
 
 __init__.py — Package initialization for haive
-cli.py — CLI entry point with commands for indexing, discovering, loading, and running the harness
+cli.py — CLI entry point with commands for indexing, discovering, loading, running, and pruning branches
   config_create (function) — 18-25 — Create a new named configuration
   config_use (function) — 29-36 — Activate a named configuration
   config_set (function) — 40-50 — Set a KEY=VALUE in the active configuration
@@ -11,7 +11,8 @@ cli.py — CLI entry point with commands for indexing, discovering, loading, and
   index (function) — 151-202 — Generate or validate per-directory agent.md index files
   discover (function) — 208-269 — Run Code Discovery Agent to find relevant files for a task
   load (function) — 275-341 — Discover relevant files and load their source content
-  run (function) — 347-595 — Execute haive harness for a project milestone across waves
+  run (function) — 347-646 — Execute haive harness for a project milestone across waves
+  prune_branches (function) — 652-709 — Delete haive/task-* branches whose PRs have been merged
 adapters/ — Project management and version control adapter interfaces for PM and VCS platforms
 config/ — Configuration management for named environments with validation and editing
 discovery/ — Agent.md indexing, code discovery navigation, and file content loading services
