@@ -453,12 +453,13 @@ class TestUpdateAfterTask:
             "## Files\n\ntask.py — Old task model\nstate.py — State model\n"
         )
 
-        service.update_after_task(["task.py"], str(tmp_path))
+        touched = service.update_after_task(["task.py"], str(tmp_path))
 
         mock_client.call_single.assert_called()
         written = (tmp_path / "agent.md").read_text()
         assert "Updated task model" in written
         assert "state.py — State model" in written
+        assert touched == ["agent.md"]
 
     def test_update_after_task_corrects_wrong_symbol_line_range(self, tmp_path):
         mock_client = MagicMock()
@@ -487,13 +488,14 @@ class TestUpdateAfterTask:
         )
 
         # task.py is listed but does not exist on disk → treated as deleted
-        service.update_after_task(["task.py"], str(tmp_path))
+        touched = service.update_after_task(["task.py"], str(tmp_path))
 
         mock_client.call_single.assert_not_called()
         written = (tmp_path / "agent.md").read_text()
         assert "task.py" not in written
         assert "Task (class)" not in written
         assert "state.py — State model" in written
+        assert touched == ["agent.md"]
 
     def test_new_directory_triggers_full_generation(self, tmp_path):
         mock_client = MagicMock()

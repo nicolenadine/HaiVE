@@ -476,6 +476,28 @@ def run(
                 typer.echo(f"Found {len(tasks)} existing task(s).")
 
                 state = state_store.load_or_init(milestone_id)
+
+                # Reconcile tasks stuck awaiting a manual merge: if a human has since
+                # merged the PR, mark the task complete instead of leaving it stuck
+                # forever. Only ever queries tasks that already have a stored pr_id
+                # (i.e. passed review) — genuine review failures cost no extra calls.
+                reconciled = False
+                for t in tasks:
+                    if t.status != TaskStatus.AWAITING_MERGE:
+                        continue
+                    record = state.tasks.get(t.task_id)
+                    if not record or not record.pr_id:
+                        continue
+                    try:
+                        if vcs.is_pr_merged(record.pr_id):
+                            pm.update_status(t.task_id, TaskStatus.COMPLETE)
+                            typer.echo(f"  [#{t.task_id}] PR #{record.pr_id} was merged — marking complete.")
+                            reconciled = True
+                    except RuntimeError as exc:
+                        typer.echo(f"  [#{t.task_id}] Could not check PR #{record.pr_id} status: {exc}")
+                if reconciled:
+                    tasks = pm.get_tasks(milestone_id)
+
                 since = state.last_run_at or state.created_at
                 new_comments = pm.read_new_comments(milestone_id, since)
 
@@ -553,12 +575,18 @@ def run(
 
                 wave_complete = 0
                 wave_needs_review = 0
+                wave_awaiting_merge = 0
+                wave_blocked = 0
 
                 def on_task_complete(record: TaskExecutionRecord) -> None:
-                    nonlocal wave_complete, wave_needs_review
-                    if record.verdict is not None and record.verdict.passed:
+                    nonlocal wave_complete, wave_needs_review, wave_awaiting_merge
+                    passed = record.verdict is not None and record.verdict.passed
+                    if passed and record.merged:
                         wave_complete += 1
                         typer.secho(f"  ✓ Task #{record.task_id} — complete", fg="green")
+                    elif passed and not record.merged:
+                        wave_awaiting_merge += 1
+                        typer.secho(f"  ⏳ Task #{record.task_id} — awaiting merge", fg="yellow")
                     else:
                         wave_needs_review += 1
                         typer.secho(f"  ✗ Task #{record.task_id} — needs-human-review", fg="red")
@@ -580,6 +608,7 @@ def run(
                     f"\nWave {wave_num} complete — "
                     f"{wave_complete} complete, "
                     f"{wave_needs_review} needs-human-review, "
+                    f"{wave_awaiting_merge} awaiting-merge, "
                     f"{wave_blocked} blocked",
                     bold=True,
                 )
@@ -594,6 +623,69 @@ def run(
         raise typer.Exit(code=1)
     except ValidationError as e:
         typer.secho(f"Validation error: {e}", fg="red", err=True)
+        raise typer.Exit(code=1)
+
+
+# ── Prune-branches command ────────────────────────────────────────────────────
+
+@app.command("prune-branches")
+def prune_branches(
+    yes: bool = typer.Option(
+        False,
+        "--yes", "-y",
+        is_flag=True,
+        help="Delete without confirmation prompt.",
+    ),
+) -> None:
+    """List haive/task-* branches whose PRs have been merged, and delete them."""
+    _preflight_checks()
+
+    from haive.adapters.vcs.github import GitHubVCSAdapter
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+        vcs = GitHubVCSAdapter(settings)
+
+        branches = vcs.list_task_branches("haive/task-")
+        merged: list[tuple[str, str]] = []
+        unmerged_closed: list[tuple[str, str]] = []
+        for b in branches:
+            info = vcs.find_pr_for_branch(b)
+            if info is None:
+                continue
+            pr_id, is_merged = info
+            if is_merged:
+                merged.append((b, pr_id))
+            else:
+                unmerged_closed.append((b, pr_id))
+
+        if unmerged_closed:
+            typer.echo(
+                f"{len(unmerged_closed)} branch(es) have a closed-but-unmerged PR — "
+                "not pruned automatically, review manually:"
+            )
+            for b, pr_id in unmerged_closed:
+                typer.echo(f"  - {b}  (PR #{pr_id}, closed without merging)")
+
+        if not merged:
+            typer.echo("No merged task branches to prune.")
+            return
+
+        typer.echo(f"{len(merged)} merged task branch(es) eligible for deletion:")
+        for b, pr_id in merged:
+            typer.echo(f"  - {b}  (PR #{pr_id})")
+
+        if not yes and not typer.confirm(f"Delete these {len(merged)} branch(es)?"):
+            typer.echo("Aborted — no branches deleted.")
+            return
+
+        for b, _ in merged:
+            vcs.delete_branch(b)
+            typer.echo(f"  Deleted {b}")
+
+    except RuntimeError as e:
+        typer.secho(f"Error: {e}", fg="red", err=True)
         raise typer.Exit(code=1)
 
 

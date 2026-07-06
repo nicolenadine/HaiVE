@@ -9,12 +9,13 @@ class TestTaskStatus:
             "in_progress",
             "complete",
             "needs_human_review",
+            "awaiting_merge",
             "blocked",
             "skipped",
         }
 
     def test_count(self):
-        assert len(TaskStatus) == 6
+        assert len(TaskStatus) == 7
 
     def test_serializes_to_string(self):
         assert TaskStatus.IN_PROGRESS == "in_progress"

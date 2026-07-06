@@ -1,6 +1,7 @@
 import subprocess
 from unittest.mock import MagicMock, call, patch
 
+import github
 import pytest
 
 from haive.adapters.vcs.github import GitHubVCSAdapter
@@ -54,13 +55,81 @@ class TestCreateBranch:
         source.commit.sha = "abc123"
         adapter._repo_obj.get_branch.return_value = source
 
-        adapter.create_branch("haive/project-1", "main")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.create_branch("haive/project-1", "main")
 
         adapter._repo_obj.get_branch.assert_called_once_with("main")
         adapter._repo_obj.create_git_ref.assert_called_once_with(
             ref="refs/heads/haive/project-1",
             sha="abc123",
         )
+
+    def test_checks_out_local_branch_after_remote_ref(self):
+        adapter = _make_adapter()
+        source = MagicMock()
+        source.commit.sha = "abc123"
+        adapter._repo_obj.get_branch.return_value = source
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.create_branch("haive/project-1", "main")
+
+        mock_run.assert_called_once_with(
+            ["git", "checkout", "-B", "haive/project-1", "main"],
+            check=True, capture_output=True,
+        )
+
+    def test_reuses_branch_that_already_exists_remotely(self):
+        adapter = _make_adapter()
+        source = MagicMock()
+        source.commit.sha = "abc123"
+        adapter._repo_obj.get_branch.return_value = source
+        adapter._repo_obj.create_git_ref.side_effect = github.GithubException(422, "exists", None)
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.create_branch("haive/project-1", "main")
+
+        mock_run.assert_called_once_with(
+            ["git", "checkout", "-B", "haive/project-1", "main"],
+            check=True, capture_output=True,
+        )
+
+    def test_local_checkout_failure_raises_runtime_error(self):
+        adapter = _make_adapter()
+        source = MagicMock()
+        source.commit.sha = "abc123"
+        adapter._repo_obj.get_branch.return_value = source
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(1, "git checkout", stderr=b"error")
+            with pytest.raises(RuntimeError, match="git command failed"):
+                adapter.create_branch("haive/project-1", "main")
+
+
+# ---------------------------------------------------------------------------
+# TestCheckoutBranch
+# ---------------------------------------------------------------------------
+
+class TestCheckoutBranch:
+    def test_runs_checkout_then_pull(self):
+        adapter = _make_adapter()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.checkout_branch("main")
+
+        assert mock_run.call_count == 2
+        calls = mock_run.call_args_list
+        assert calls[0] == call(["git", "checkout", "main"], check=True, capture_output=True)
+        assert calls[1] == call(["git", "pull", "origin", "main"], check=True, capture_output=True)
+
+    def test_raises_runtime_error_on_git_failure(self):
+        adapter = _make_adapter()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(1, "git checkout", stderr=b"error")
+            with pytest.raises(RuntimeError, match="git command failed"):
+                adapter.checkout_branch("main")
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +250,101 @@ class TestCreateProjectPR:
             head="haive/project-1",
             base="main",
         )
+
+
+# ---------------------------------------------------------------------------
+# TestIsPRMerged
+# ---------------------------------------------------------------------------
+
+class TestIsPRMerged:
+    def test_returns_true_when_merged(self):
+        adapter = _make_adapter()
+        pr = MagicMock()
+        pr.merged = True
+        adapter._repo_obj.get_pull.return_value = pr
+
+        assert adapter.is_pr_merged("7") is True
+        adapter._repo_obj.get_pull.assert_called_once_with(7)
+
+    def test_returns_false_when_not_merged(self):
+        adapter = _make_adapter()
+        pr = MagicMock()
+        pr.merged = False
+        adapter._repo_obj.get_pull.return_value = pr
+
+        assert adapter.is_pr_merged("7") is False
+
+
+# ---------------------------------------------------------------------------
+# TestListTaskBranches
+# ---------------------------------------------------------------------------
+
+class TestListTaskBranches:
+    def test_filters_by_prefix(self):
+        adapter = _make_adapter()
+        b1, b2, b3 = MagicMock(), MagicMock(), MagicMock()
+        b1.name = "haive/task-1"
+        b2.name = "haive/task-2"
+        b3.name = "main"
+        adapter._repo_obj.get_branches.return_value = [b1, b2, b3]
+
+        result = adapter.list_task_branches("haive/task-")
+
+        assert result == ["haive/task-1", "haive/task-2"]
+
+
+# ---------------------------------------------------------------------------
+# TestFindPRForBranch
+# ---------------------------------------------------------------------------
+
+class TestFindPRForBranch:
+    def test_returns_pr_number_and_merged_state(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.owner.login = "owner"
+        pr = MagicMock()
+        pr.number = 9
+        pr.merged = True
+        adapter._repo_obj.get_pulls.return_value = [pr]
+
+        result = adapter.find_pr_for_branch("haive/task-9")
+
+        assert result == ("9", True)
+        adapter._repo_obj.get_pulls.assert_called_once_with(state="all", head="owner:haive/task-9")
+
+    def test_returns_unmerged_state(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.owner.login = "owner"
+        pr = MagicMock()
+        pr.number = 9
+        pr.merged = False
+        adapter._repo_obj.get_pulls.return_value = [pr]
+
+        result = adapter.find_pr_for_branch("haive/task-9")
+
+        assert result == ("9", False)
+
+    def test_returns_none_when_no_pr_found(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.owner.login = "owner"
+        adapter._repo_obj.get_pulls.return_value = []
+
+        assert adapter.find_pr_for_branch("haive/task-9") is None
+
+
+# ---------------------------------------------------------------------------
+# TestDeleteBranch
+# ---------------------------------------------------------------------------
+
+class TestDeleteBranch:
+    def test_deletes_git_ref(self):
+        adapter = _make_adapter()
+        ref = MagicMock()
+        adapter._repo_obj.get_git_ref.return_value = ref
+
+        adapter.delete_branch("haive/task-9")
+
+        adapter._repo_obj.get_git_ref.assert_called_once_with("heads/haive/task-9")
+        ref.delete.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

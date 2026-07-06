@@ -60,6 +60,7 @@ class TaskExecutionRecord(BaseModel):
     prompt_version: str | None = None
     changed_files:  list[str] = Field(default_factory=list)
     pr_id:          str | None = None
+    merged:         bool = True
     completed_at:   datetime | None = None
     token_usage:    TokenUsage | None = None
     executor_start: datetime | None = None

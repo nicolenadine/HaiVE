@@ -9,7 +9,6 @@ from haive.adapters.pm.base import PMAdapter
 from haive.adapters.vcs.base import VCSAdapter
 from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
 from haive.discovery.file_index_service import FileIndexService
-from haive.discovery.git_utils import get_changed_files
 from haive.execution.context_assembler import ContextAssembler
 from haive.execution.output_validator import OutputValidationError, OutputValidator
 from haive.execution.review_agent import ReviewAgent
@@ -59,6 +58,10 @@ class TaskExecutor:
         self._on_status = on_status or (lambda _: None)
         self._validator = OutputValidator()
         self._assembler = ContextAssembler()
+        # Set once a merge fails with the repo-wide "not allowed" error, so
+        # subsequent tasks in this run skip repeating a call already known
+        # to fail, rather than piling up many independently-stuck PRs.
+        self._auto_merge_disabled_this_run = False
 
     def run(
         self,
@@ -260,8 +263,9 @@ class TaskExecutor:
         vcs: VCSAdapter,
         state_store: StateStore,
     ) -> TaskExecutionRecord:
-        _apply_output(agent_output, self._root)
-        changed_files = get_changed_files(self._root)
+        task_changed_files = _apply_output(agent_output, self._root)
+        agent_md_touched = file_index.update_after_task(task_changed_files, self._root)
+        changed_files = sorted(set(task_changed_files) | set(agent_md_touched))
         self._on_status(f"  [#{task.task_id}] pushing {len(changed_files)} file(s): {', '.join(changed_files)}")
         vcs.push_commits(
             task_branch,
@@ -276,14 +280,38 @@ class TaskExecutor:
         )
         self._on_status(f"  [#{task.task_id}] PR created: #{pr_id}" + ("" if self._auto_merge else " (not auto-merged)"))
         vcs.add_pr_comment(pr_id, _format_pr_comment(record.attempt_log, verdict))
+
         if self._auto_merge:
-            vcs.merge_pr(pr_id)
-        pm.update_status(task.task_id, TaskStatus.COMPLETE)
-        file_index.update_after_task(changed_files, self._root)
+            if self._auto_merge_disabled_this_run:
+                merged = False
+                merge_exc_text = "auto-merge disabled for this run (repository does not support it)"
+            else:
+                try:
+                    vcs.merge_pr(pr_id)
+                    merged, merge_exc_text = True, None
+                except RuntimeError as exc:
+                    merged, merge_exc_text = False, str(exc)
+                    if "Auto merge is not allowed for this repository" in merge_exc_text:
+                        self._auto_merge_disabled_this_run = True
+
+            if merged:
+                pm.update_status(task.task_id, TaskStatus.COMPLETE)
+            else:
+                self._on_status(f"  [#{task.task_id}] auto-merge failed — leaving PR #{pr_id} open: {merge_exc_text}")
+                note = _format_merge_failure_note(pr_id, merge_exc_text)
+                vcs.add_pr_comment(pr_id, note)
+                pm.add_comment(task.task_id, note)
+                pm.update_status(task.task_id, TaskStatus.AWAITING_MERGE)
+        else:
+            merged = True  # --no-merge: deliberate, unchanged — still marks complete
+            pm.update_status(task.task_id, TaskStatus.COMPLETE)
+
+        vcs.checkout_branch(self._project_branch)
 
         now = _utcnow()
         record.verdict = verdict.to_summary()
         record.pr_id = pr_id
+        record.merged = merged
         record.changed_files = changed_files
         record.model_used = response_model
         record.tier_used = complexity
@@ -332,7 +360,7 @@ class TaskExecutor:
 
 # ── module-level helpers ──────────────────────────────────────────────────────
 
-def _apply_output(agent_output: object, root: str) -> None:
+def _apply_output(agent_output: object, root: str) -> list[str]:
     if isinstance(agent_output, ScaffoldAgentOutput):
         items = [(f.path, f.content) for f in agent_output.files]
     else:
@@ -341,6 +369,7 @@ def _apply_output(agent_output: object, root: str) -> None:
         p = Path(root) / path_str
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
+    return [path_str for path_str, _ in items]
 
 
 def _format_attempt_summary(attempt_log: list[AttemptLogEntry]) -> str:
@@ -369,3 +398,12 @@ def _format_pr_comment(
         lines.append("")
         lines.append(f"Completed after {len(attempt_log)} attempt(s).")
     return "\n".join(lines)
+
+
+def _format_merge_failure_note(pr_id: str, reason: str) -> str:
+    return (
+        f"**haive: auto-merge failed for PR #{pr_id}**\n\n"
+        "This task already passed review — the code is correct, only the merge step failed. "
+        "No rewrite is needed; merge the PR manually to complete this task.\n\n"
+        f"Reason: {reason}"
+    )
