@@ -49,15 +49,49 @@ class GitHubVCSAdapter:
                 sha=source.commit.sha,
             )
         except github.GithubException as exc:
-            if exc.status == 422:  # branch already exists — reuse it
-                return
-            raise
+            if exc.status != 422:  # 422 = branch already exists remotely — reuse it
+                raise
+
+        # create_git_ref only creates the branch on GitHub. Without a matching
+        # local branch, push_commits()'s git commands would run against
+        # whatever happens to be checked out, not this task's branch.
+        try:
+            subprocess.run(
+                ["git", "checkout", "-B", branch_name, base_branch],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"git command failed: {e.cmd}\nstdout: {e.stdout}\nstderr: {e.stderr}"
+            ) from e
 
     def push_commits(self, branch: str, changed_files: list[str], message: str) -> None:
         try:
+            # Reset the index first: `git add -- changed_files` only guarantees
+            # those files get staged, not that nothing *else* is staged. Without
+            # this, anything already in the index from unrelated prior activity
+            # would be committed here too, regardless of changed_files.
+            subprocess.run(["git", "reset"], check=True, capture_output=True)
             subprocess.run(["git", "add", "--"] + changed_files, check=True, capture_output=True)
             subprocess.run(["git", "commit", "-m", message], check=True, capture_output=True)
             subprocess.run(["git", "push", "origin", branch], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"git command failed: {e.cmd}\nstdout: {e.stdout}\nstderr: {e.stderr}"
+            ) from e
+
+    def checkout_branch(self, branch_name: str) -> None:
+        """Return the local working directory to branch_name and sync with origin.
+
+        Called after a task's PR is fully handled, so the next task (or the
+        wave summary) sees a clean, up-to-date base rather than staying on
+        the just-finished task's branch. Best-effort: enablePullRequestAutoMerge
+        is asynchronous, so this pull may not include this task's own merge
+        yet, though it will include any earlier task's completed merge.
+        """
+        try:
+            subprocess.run(["git", "checkout", branch_name], check=True, capture_output=True)
+            subprocess.run(["git", "pull", "origin", branch_name], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
                 f"git command failed: {e.cmd}\nstdout: {e.stdout}\nstderr: {e.stderr}"
@@ -90,3 +124,20 @@ class GitHubVCSAdapter:
 
     def create_project_pr(self, head_branch: str, base_branch: str, title: str, body: str) -> str:
         return self.create_pr(title, body, head_branch, base_branch)
+
+    def is_pr_merged(self, pr_id: str) -> bool:
+        return self._repo_obj.get_pull(int(pr_id)).merged
+
+    def list_task_branches(self, prefix: str) -> list[str]:
+        return [b.name for b in self._repo_obj.get_branches() if b.name.startswith(prefix)]
+
+    def find_pr_for_branch(self, branch_name: str) -> tuple[str, bool] | None:
+        """Returns (pr_number, merged) for the first PR (any state) with this head branch, or None."""
+        owner = self._repo_obj.owner.login
+        pulls = self._repo_obj.get_pulls(state="all", head=f"{owner}:{branch_name}")
+        for pr in pulls:
+            return (str(pr.number), pr.merged)
+        return None
+
+    def delete_branch(self, branch_name: str) -> None:
+        self._repo_obj.get_git_ref(f"heads/{branch_name}").delete()

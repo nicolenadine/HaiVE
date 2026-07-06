@@ -84,6 +84,18 @@ class TestSchemaValidation:
         with pytest.raises(OutputValidationError):
             OutputValidator().validate(raw, AgentRole.IMPLEMENTATION_AGENT)
 
+    def test_empty_edits_list_raises(self):
+        # A submission with zero edits can never satisfy a code-editing task —
+        # reject it here rather than let it silently pass review as a no-op.
+        raw = json.dumps({"edits": [], "notes": "nothing to change"})
+        with pytest.raises(OutputValidationError):
+            OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
+
+    def test_empty_files_list_raises(self):
+        raw = json.dumps({"files": [], "notes": ""})
+        with pytest.raises(OutputValidationError):
+            OutputValidator().validate(raw, AgentRole.SCAFFOLD_AGENT)
+
 
 # ── all ten roles ─────────────────────────────────────────────────────────────
 

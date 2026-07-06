@@ -156,10 +156,14 @@ When either condition holds:
 
 Never create a recovery task if lineage_depth >= {max_recovery_depth}.
 
+A task with status "awaiting_merge" is never eligible for recovery and never needs one — it
+already passed review and is sitting in an open, approved PR; only a merge action is pending, not
+a rewrite. Do not create a recovery task for it under any circumstances.
+
 ## Done condition
 
-Set done=true only when every task has status "complete" and no pending, blocked, or
-in_progress tasks remain. new_tasks must be empty when done=true.
+Set done=true only when every task has status "complete" and no pending, blocked, in_progress, or
+awaiting_merge tasks remain. new_tasks must be empty when done=true.
 
 ## Using the repo map
 

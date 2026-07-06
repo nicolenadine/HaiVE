@@ -93,6 +93,20 @@ simpler regex-plus-brace-depth-counting heuristic per language. Deferred until h
 actually run against a non-Python project, so the approach can be validated against real
 code rather than built speculatively.
 
+### Per-task git worktree isolation
+Task #16 revealed that `create_branch()` only creates a branch on GitHub via API, never a
+local one — so `push_commits()`'s git commands ran against whatever was checked out at
+process start, sweeping in unrelated uncommitted files. Fixed for the common case: `create_branch`
+now does a local `git checkout -B`, and `checkout_branch()` returns to `project_branch` (+ pulls)
+once a task's PR is handled. But checking out a branch is repo-wide on one shared working
+directory — with `MAX_EXECUTORS = 2` (task_scheduler.py), two tasks can genuinely run
+concurrently in separate threads and race on which branch is checked out, or interleave file
+writes. Full safety under real concurrency needs each task to execute in its own `git worktree`
+(a separate real directory checked out to its own branch, so concurrent tasks can't collide no
+matter how many run at once) — bigger change, touching `TaskExecutor`/`VCSAdapter`/worktree
+lifecycle and cleanup. Deferred; the current fix is correct for sequential/single-task execution,
+which is what's been exercised so far.
+
 ---
 
 ## GitHub Native Issue Relationships

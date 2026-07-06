@@ -15,7 +15,7 @@ class FileToCreate(BaseModel):
 class ScaffoldAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    files: list[FileToCreate] = Field(description="Files to create.")
+    files: list[FileToCreate] = Field(min_length=1, description="Files to create.")
     notes: str = Field(default="", description="Optional notes for the reviewer.")
 
 
@@ -31,7 +31,7 @@ class FileEdit(BaseModel):
 class CodeEditorOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edits: list[FileEdit] = Field(description="Files to write or overwrite.")
+    edits: list[FileEdit] = Field(min_length=1, description="Files to write or overwrite.")
     notes: str = Field(default="", description="Optional notes for the reviewer.")
 
 
@@ -85,7 +85,7 @@ class ReviewAgentOutput(BaseModel):
 class TestGeneratorOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edits: list[FileEdit] = Field(description="Test files to write or overwrite.")
+    edits: list[FileEdit] = Field(min_length=1, description="Test files to write or overwrite.")
     notes: str = Field(default="", description="Optional notes about test coverage.")
 
 
@@ -94,7 +94,7 @@ class TestGeneratorOutput(BaseModel):
 class DocumentationWriterOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edits: list[FileEdit] = Field(description="Documentation files to write or overwrite.")
+    edits: list[FileEdit] = Field(min_length=1, description="Documentation files to write or overwrite.")
     notes: str = Field(default="", description="Optional notes for the reviewer.")
 
 

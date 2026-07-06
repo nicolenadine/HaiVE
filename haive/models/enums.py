@@ -6,6 +6,7 @@ class TaskStatus(str, Enum):
     IN_PROGRESS        = "in_progress"
     COMPLETE           = "complete"
     NEEDS_HUMAN_REVIEW = "needs_human_review"
+    AWAITING_MERGE     = "awaiting_merge"
     BLOCKED            = "blocked"
     SKIPPED            = "skipped"
 

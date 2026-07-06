@@ -102,13 +102,16 @@ def make_discovery_result(*, has_sections: bool = False) -> DiscoveryResult:
     return DiscoveryResult(sections=sections, status="found" if has_sections else "empty")
 
 
-def make_executor(tmp_path, *, low_attempts: int = 2, medium_attempts: int = 2) -> TaskExecutor:
+def make_executor(
+    tmp_path, *, low_attempts: int = 2, medium_attempts: int = 2, auto_merge: bool = True
+) -> TaskExecutor:
     return TaskExecutor(
         model_client=MagicMock(spec=ModelClient),
         tier_config=make_tier_config(low_attempts, medium_attempts),
         review_agent=MagicMock(spec=ReviewAgent),
         root=str(tmp_path),
         project_branch="main",
+        auto_merge=auto_merge,
     )
 
 
@@ -122,6 +125,9 @@ def make_services(tmp_path):
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text("You are an implementation agent.")
 
+    file_index = MagicMock()
+    file_index.update_after_task.return_value = []
+
     return dict(
         project_id="proj-1",
         project_state=ProjectState(
@@ -129,7 +135,7 @@ def make_services(tmp_path):
             created_at=_NOW, updated_at=_NOW,
         ),
         discovery_agent=MagicMock(),
-        file_index=MagicMock(),
+        file_index=file_index,
         registry=registry,
         pm=MagicMock(),
         vcs=MagicMock(),
@@ -150,18 +156,18 @@ class TestHappyPath:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-99"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=["haive/client.py"]):
-            record = executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
         assert record.verdict is not None
         assert record.verdict.passed is True
         assert record.pr_id == "pr-99"
+        assert record.merged is True
         assert record.total_attempts == 1
         svc["pm"].update_status.assert_called_with(make_task().task_id, TaskStatus.COMPLETE)
         svc["vcs"].create_branch.assert_called_once_with("haive/task-42", "main")
         svc["vcs"].merge_pr.assert_called_once_with("pr-99")
 
-    def test_changed_files_sourced_from_get_changed_files(self, tmp_path):
+    def test_changed_files_sourced_from_edits_and_agent_md_updates(self, tmp_path):
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
@@ -169,17 +175,18 @@ class TestHappyPath:
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
+        svc["file_index"].update_after_task.return_value = ["haive/agent.md"]
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=["x.py", "y.py"]):
-            record = executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
+        # make_editor_response() edits haive/client.py; update_after_task adds haive/agent.md.
         svc["vcs"].push_commits.assert_called_once()
         _, args, _ = svc["vcs"].push_commits.mock_calls[0]
-        assert args[1] == ["x.py", "y.py"]
-        assert record.changed_files == ["x.py", "y.py"]
+        assert args[1] == ["haive/agent.md", "haive/client.py"]
+        assert record.changed_files == ["haive/agent.md", "haive/client.py"]
 
-    def test_update_after_task_called_with_changed_files(self, tmp_path):
+    def test_update_after_task_called_with_edited_files_before_push(self, tmp_path):
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
@@ -189,10 +196,105 @@ class TestHappyPath:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=["changed.py"]):
+        manager = MagicMock()
+        manager.attach_mock(svc["file_index"].update_after_task, "update_after_task")
+        manager.attach_mock(svc["vcs"].push_commits, "push_commits")
+
+        executor.run(make_task(), **svc)
+
+        svc["file_index"].update_after_task.assert_called_once_with(["haive/client.py"], str(tmp_path))
+        call_names = [c[0] for c in manager.mock_calls]
+        assert call_names.index("update_after_task") < call_names.index("push_commits")
+
+
+# ── merge failures ────────────────────────────────────────────────────────────
+
+class TestMergeFailure:
+    def test_merge_failure_marks_awaiting_merge_and_does_not_crash(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+        svc["vcs"].merge_pr.side_effect = RuntimeError("merge conflict")
+
+        record = executor.run(make_task(), **svc)
+
+        assert record.verdict is not None
+        assert record.verdict.passed is True  # review genuinely passed
+        assert record.merged is False
+        svc["pm"].update_status.assert_called_with("42", TaskStatus.AWAITING_MERGE)
+        # Two distinct comments: one on the PR, one on the issue — both mention the failure.
+        pr_comment_calls = [c for c in svc["vcs"].add_pr_comment.call_args_list if c.args[0] == "pr-1"]
+        assert any("auto-merge failed" in c.args[1].lower() for c in pr_comment_calls)
+        assert svc["pm"].add_comment.call_count == 1
+        assert "auto-merge failed" in svc["pm"].add_comment.call_args.args[1].lower()
+        svc["vcs"].checkout_branch.assert_called_once_with("main")
+
+    def test_no_merge_flag_still_marks_complete(self, tmp_path):
+        executor = make_executor(tmp_path, auto_merge=False)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        record = executor.run(make_task(), **svc)
+
+        assert record.merged is True
+        svc["vcs"].merge_pr.assert_not_called()
+        svc["pm"].update_status.assert_called_with("42", TaskStatus.COMPLETE)
+
+    def test_repo_wide_unsupported_error_disables_merge_for_rest_of_run(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+        svc["vcs"].merge_pr.side_effect = RuntimeError(
+            "GitHub GraphQL error: Auto merge is not allowed for this repository"
+        )
+
+        executor.run(make_task(), **svc)
+        assert executor._auto_merge_disabled_this_run is True
+        assert svc["vcs"].merge_pr.call_count == 1
+
+        # Second task in the same executor instance: skips merge_pr entirely, still marks awaiting_merge.
+        svc2 = make_services(tmp_path)
+        svc2["discovery_agent"].discover.return_value = make_discovery_result()
+        svc2["file_index"].load_sections.return_value = []
+        svc2["vcs"].create_pr.return_value = "pr-2"
+
+        record2 = executor.run(make_task(task_id="43"), **svc2)
+
+        svc2["vcs"].merge_pr.assert_not_called()
+        assert record2.merged is False
+        svc2["pm"].update_status.assert_called_with("43", TaskStatus.AWAITING_MERGE)
+
+    def test_checkout_branch_runs_even_when_push_commits_fails(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].push_commits.side_effect = RuntimeError("git push failed: network error")
+
+        with pytest.raises(RuntimeError, match="network error"):
             executor.run(make_task(), **svc)
 
-        svc["file_index"].update_after_task.assert_called_once_with(["changed.py"], str(tmp_path))
+        # The original exception still propagates, but the local repo must not
+        # be left stuck on the task branch — checkout_branch always runs.
+        svc["vcs"].checkout_branch.assert_called_once_with("main")
 
 
 # ── retry / feedback ──────────────────────────────────────────────────────────
@@ -220,8 +322,7 @@ class TestRetry:
 
         executor._assembler.assemble = capture_assemble
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            record = executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
         assert record.total_attempts == 2
         assert assembled_calls[0] is None      # first attempt has no feedback
@@ -240,8 +341,7 @@ class TestRetry:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            executor.run(make_task(), **svc)
+        executor.run(make_task(), **svc)
 
         # reviewer called only once (second attempt), not for the schema-failed first attempt
         assert executor._review_agent.review.call_count == 1
@@ -259,8 +359,7 @@ class TestRetry:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            record = executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
         schema_entries = [e for e in record.attempt_log if "Schema" in e.reason]
         assert len(schema_entries) == 1
@@ -282,8 +381,7 @@ class TestTierEscalation:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            record = executor.run(make_task(complexity=Complexity.LOW), **svc)
+        record = executor.run(make_task(complexity=Complexity.LOW), **svc)
 
         # discovery called twice: once per tier
         assert svc["discovery_agent"].discover.call_count == 2
@@ -343,8 +441,7 @@ class TestTierEscalation:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            record = executor.run(make_task(complexity=Complexity.MEDIUM), **svc)
+        record = executor.run(make_task(complexity=Complexity.MEDIUM), **svc)
 
         # LOW tier never ran — only one discover() call
         assert svc["discovery_agent"].discover.call_count == 1
@@ -368,8 +465,7 @@ class TestDiscoveryStatus:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            executor.run(make_task(agent_role=AgentRole.IMPLEMENTATION_AGENT), **svc)
+        executor.run(make_task(agent_role=AgentRole.IMPLEMENTATION_AGENT), **svc)
 
         call_kwargs = executor._review_agent.review.call_args
         status = call_kwargs.kwargs.get("discovery_status") or call_kwargs[0][3]
@@ -393,8 +489,7 @@ class TestDiscoveryStatus:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            executor.run(make_task(agent_role=AgentRole.SCAFFOLD_AGENT), **svc)
+        executor.run(make_task(agent_role=AgentRole.SCAFFOLD_AGENT), **svc)
 
         call_kwargs = executor._review_agent.review.call_args
         status = call_kwargs.kwargs.get("discovery_status") or call_kwargs[0][3]
@@ -410,8 +505,7 @@ class TestDiscoveryStatus:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            executor.run(make_task(), **svc)
+        executor.run(make_task(), **svc)
 
         call_kwargs = executor._review_agent.review.call_args
         status = call_kwargs.kwargs.get("discovery_status") or call_kwargs[0][3]
@@ -466,8 +560,7 @@ class TestAPIErrorHandling:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].create_pr.return_value = "pr-1"
 
-        with patch("haive.execution.task_executor.get_changed_files", return_value=[]):
-            record = executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
         assert record.total_attempts == 1
 

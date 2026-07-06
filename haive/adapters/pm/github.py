@@ -26,6 +26,7 @@ _GH_STATUS_MAP: dict[str, TaskStatus] = {
     "in progress":        TaskStatus.IN_PROGRESS,
     "complete":           TaskStatus.COMPLETE,
     "needs_human_review": TaskStatus.NEEDS_HUMAN_REVIEW,
+    "awaiting_merge":     TaskStatus.AWAITING_MERGE,
     "blocked":            TaskStatus.BLOCKED,
     "skipped":            TaskStatus.SKIPPED,
 }

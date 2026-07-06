@@ -99,7 +99,10 @@ class TaskScheduler:
 
     @staticmethod
     def _status_from_record(record: TaskExecutionRecord) -> TaskStatus:
-        if record.verdict is not None and record.verdict.passed:
+        # merged=False (review passed, but the merge itself failed or is deferred)
+        # must not be treated as complete here — the code isn't actually in
+        # project_branch yet, so downstream dependents can't safely unblock.
+        if record.verdict is not None and record.verdict.passed and record.merged:
             return TaskStatus.COMPLETE
         return TaskStatus.NEEDS_HUMAN_REVIEW
 

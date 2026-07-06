@@ -27,10 +27,11 @@ def make_task(task_id: str, *, depends_on: list[str] | None = None) -> Task:
     )
 
 
-def make_record(task_id: str, *, passed: bool = True) -> TaskExecutionRecord:
+def make_record(task_id: str, *, passed: bool = True, merged: bool = True) -> TaskExecutionRecord:
     return TaskExecutionRecord(
         task_id=task_id,
         verdict=VerdictSummary(passed=passed, reason="done") if passed else None,
+        merged=merged,
     )
 
 
@@ -232,3 +233,21 @@ class TestNonPendingTasks:
         TaskScheduler().start([complete_task, pending_task], factory, pm=MagicMock(spec=PMAdapter))
 
         assert "child" in executed
+
+
+# ── status derivation ─────────────────────────────────────────────────────────
+
+class TestStatusFromRecord:
+    def test_passed_and_merged_is_complete(self):
+        record = make_record("1", passed=True, merged=True)
+        assert TaskScheduler._status_from_record(record) == TaskStatus.COMPLETE
+
+    def test_passed_but_not_merged_is_needs_human_review(self):
+        # Review passed but the merge itself failed/is deferred — the code isn't
+        # actually in project_branch yet, so dependents must not unblock on this.
+        record = make_record("1", passed=True, merged=False)
+        assert TaskScheduler._status_from_record(record) == TaskStatus.NEEDS_HUMAN_REVIEW
+
+    def test_failed_is_needs_human_review_regardless_of_merged(self):
+        record = make_record("1", passed=False, merged=True)
+        assert TaskScheduler._status_from_record(record) == TaskStatus.NEEDS_HUMAN_REVIEW

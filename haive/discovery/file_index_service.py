@@ -111,7 +111,7 @@ class FileIndexService:
 
         return loaded
 
-    def update_after_task(self, changed_files: list[str], root: str) -> None:
+    def update_after_task(self, changed_files: list[str], root: str) -> list[str]:
         """Incrementally update agent.md files for directories touched by a task.
 
         Groups changed_files by directory. For each affected directory:
@@ -120,6 +120,10 @@ class FileIndexService:
           those entries, preserving all others verbatim.
         - New directory (no existing agent.md): falls back to generate().
         Non-source files and agent.md itself are ignored.
+
+        Returns the repo-relative agent.md paths actually written, so the
+        caller can include them in the same commit as the task's own edits
+        (they're not otherwise picked up automatically).
         """
         from collections import defaultdict
 
@@ -137,14 +141,18 @@ class FileIndexService:
             else:
                 by_dir[dir_rel]["deleted"].append(filename)
 
+        touched: set[str] = set()
+
         for dir_rel, changes in by_dir.items():
             dir_abs = os.path.join(root, dir_rel) if dir_rel else root
             agent_md_path = Path(dir_abs) / "agent.md"
+            agent_md_rel = os.path.join(dir_rel, "agent.md") if dir_rel else "agent.md"
 
             if changes["deleted"] and agent_md_path.is_file():
                 content = agent_md_path.read_text(encoding="utf-8")
                 content = self._remove_deleted_entries(content, set(changes["deleted"]))
                 agent_md_path.write_text(content, encoding="utf-8")
+                touched.add(agent_md_rel)
                 # TODO: if this deletion empties the directory of source files, remove
                 # its agent.md and update the parent's agent.md to drop the subdir entry
                 # (build_plan.md §Step15).
@@ -166,6 +174,9 @@ class FileIndexService:
                         and not d.startswith(".")
                     )
                     self._generate_for_dir(dir_abs, source_files, subdirs, root)
+                touched.add(agent_md_rel)
+
+        return sorted(touched)
 
     def validate_all(self, root: str) -> dict[str, list[str]]:
         """Return {relative_path: [violations]} for every agent.md found under root.
