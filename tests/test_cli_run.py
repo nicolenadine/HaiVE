@@ -91,11 +91,16 @@ def _base_mocks() -> dict:
 
     mock_scheduler = MagicMock()
 
+    mock_file_index = MagicMock()
+    mock_file_index.read_repo_map.return_value = ""
+    mock_file_index.resync_line_ranges.return_value = []
+
     return dict(
         settings=mock_settings, pm=mock_pm, vcs=mock_vcs,
         state=mock_state, state_store=mock_state_store,
         orchestrator=mock_orchestrator, registry=mock_registry,
         tier_config=mock_tier_config, scheduler=mock_scheduler,
+        file_index=mock_file_index,
     )
 
 
@@ -123,7 +128,7 @@ def _run_with_mocks(
         tc_cls = stack.enter_context(patch("haive.llm.tier_config.TierConfig"))
         stack.enter_context(patch("haive.llm.model_client.ModelClient"))
         stack.enter_context(patch("haive.discovery.code_discovery_agent.CodeDiscoveryAgent"))
-        fi_cls = stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService"))
+        stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService", return_value=m["file_index"]))
         stack.enter_context(patch("haive.orchestration.orchestrator.Orchestrator", return_value=m["orchestrator"]))
         stack.enter_context(patch("haive.orchestration.task_scheduler.TaskScheduler", return_value=m["scheduler"]))
         stack.enter_context(patch("haive.execution.review_agent.ReviewAgent"))
@@ -140,7 +145,6 @@ def _run_with_mocks(
 
         reg_cls.load.return_value = m["registry"]
         tc_cls.from_settings.return_value = m["tier_config"]
-        fi_cls.return_value.read_repo_map.return_value = ""
         mock_sp.return_value = b"step-23-cli\n"
 
         return runner.invoke(app, args, catch_exceptions=catch_exceptions)
@@ -159,6 +163,31 @@ class TestRunPreflightAgentMd:
         m = _base_mocks()
         result = _run_with_mocks(m, agent_md_exists=True)
         assert result.exit_code == 0
+
+
+class TestRunLineRangeResync:
+    def test_resync_called_with_root_before_wave_loop(self):
+        m = _base_mocks()
+        _run_with_mocks(m, root="/fake/root")
+        m["file_index"].resync_line_ranges.assert_called_once_with("/fake/root")
+
+    def test_skipped_in_dry_run(self):
+        m = _base_mocks()
+        result = _run_with_mocks(m, extra_args=["--dry-run"])
+        assert result.exit_code == 0
+        m["file_index"].resync_line_ranges.assert_not_called()
+
+    def test_prints_message_when_files_corrected(self):
+        m = _base_mocks()
+        m["file_index"].resync_line_ranges.return_value = ["haive/agent.md"]
+        result = _run_with_mocks(m)
+        assert "Corrected stale line ranges" in result.output
+        assert "haive/agent.md" in result.output
+
+    def test_no_message_when_nothing_corrected(self):
+        m = _base_mocks()
+        result = _run_with_mocks(m)
+        assert "Corrected stale line ranges" not in result.output
 
 
 class TestRunDryRun:

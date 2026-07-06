@@ -202,10 +202,23 @@ class TestCreatePR:
 # ---------------------------------------------------------------------------
 
 class TestMergePR:
-    def test_enables_automerge_via_graphql(self):
+    def test_merges_directly_when_pr_is_immediately_mergeable(self):
         adapter = _make_adapter()
         pr = MagicMock()
         pr.raw_data = {"node_id": "PR_node7"}
+        adapter._repo_obj.get_pull.return_value = pr
+
+        adapter.merge_pr("7")
+
+        adapter._repo_obj.get_pull.assert_called_once_with(7)
+        pr.merge.assert_called_once_with(merge_method="squash")
+        adapter._graphql.assert_not_called()
+
+    def test_falls_back_to_automerge_via_graphql_when_direct_merge_fails(self):
+        adapter = _make_adapter()
+        pr = MagicMock()
+        pr.raw_data = {"node_id": "PR_node7"}
+        pr.merge.side_effect = github.GithubException(405, {"message": "Pull Request is not mergeable"}, None)
         adapter._repo_obj.get_pull.return_value = pr
         adapter._graphql.return_value = {
             "enablePullRequestAutoMerge": {"pullRequest": {"number": 7}}
@@ -213,21 +226,19 @@ class TestMergePR:
 
         adapter.merge_pr("7")
 
-        adapter._repo_obj.get_pull.assert_called_once_with(7)
         call_vars = adapter._graphql.call_args[0][1]
         assert call_vars["pullRequestId"] == "PR_node7"
 
-    def test_propagates_error_if_automerge_fails(self):
+    def test_propagates_combined_error_if_both_merge_and_automerge_fail(self):
         adapter = _make_adapter()
         pr = MagicMock()
         pr.raw_data = {"node_id": "PR_node7"}
+        pr.merge.side_effect = github.GithubException(405, {"message": "Pull Request is not mergeable"}, None)
         adapter._repo_obj.get_pull.return_value = pr
         adapter._graphql.side_effect = RuntimeError("auto-merge not available")
 
         with pytest.raises(RuntimeError, match="auto-merge not available"):
             adapter.merge_pr("7")
-
-        pr.merge.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

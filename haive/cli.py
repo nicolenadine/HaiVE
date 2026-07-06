@@ -438,6 +438,11 @@ def run(
         discovery_agent = CodeDiscoveryAgent(model_client, tier_config.low)
         file_index = FileIndexService(model_client, tier_config.low)
 
+        if not dry_run:
+            resynced = file_index.resync_line_ranges(root)
+            if resynced:
+                typer.echo(f"Corrected stale line ranges in {len(resynced)} agent.md file(s): {', '.join(resynced)}")
+
         try:
             project_branch = subprocess.check_output(
                 ["git", "branch", "--show-current"], cwd=root

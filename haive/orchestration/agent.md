@@ -18,8 +18,8 @@ orchestrator.py — Main orchestrator that decomposes milestones into tasks with
   Orchestrator (class) — 37-96 — Decomposes milestones into tasks using LLM with example-based guidance and recovery logic
 examples.yaml — Predefined planning examples for milestone decomposition across 10 common patterns
 orchestrator_prompt.py — System prompt template for orchestrator LLM with task decomposition rules
-  build_orchestrator_prompt (function) — 3-174 — Builds orchestrator system prompt with decomposition rules and recovery logic
+  build_orchestrator_prompt (function) — 3-178 — Builds orchestrator system prompt with decomposition rules and recovery logic
 task_scheduler.py — Concurrent task execution scheduler respecting dependency constraints
-  TaskScheduler (class) — 13-122 — Manages parallel task execution with MAX_EXECUTORS=2, dependency ordering, and automatic blocking of downstream tasks
+  TaskScheduler (class) — 13-125 — Manages parallel task execution with MAX_EXECUTORS=2, dependency ordering, and automatic blocking of downstream tasks
 task_view_builder.py — Converts tasks and execution state into compact orchestrator-ready views
   TaskViewBuilder (class) — 12-60 — Builds task views with token budgeting to remove complete tasks when exceeding context limit

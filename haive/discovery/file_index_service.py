@@ -71,6 +71,31 @@ class FileIndexService:
 
         return "\n\n".join(blocks)
 
+    def resync_line_ranges(self, root: str) -> list[str]:
+        """Re-apply AST-based line-range correction to every existing agent.md.
+
+        Pure AST parsing against the current file content — no LLM call.
+        Catches drift introduced by edits that bypassed generate_all()/
+        update_after_task() (e.g. manual edits made outside haive's own
+        pipeline). Returns the root-relative paths of agent.md files whose
+        content changed.
+        """
+        patterns = self._load_gitignore_patterns(root)
+        touched: list[str] = []
+
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+            dirnames[:] = sorted(d for d in dirnames if not self._should_skip(d, patterns))
+            if "agent.md" not in filenames:
+                continue
+            agent_md_path = os.path.join(dirpath, "agent.md")
+            original = Path(agent_md_path).read_text(encoding="utf-8")
+            corrected = correct_line_ranges(original, dirpath)
+            if corrected != original:
+                Path(agent_md_path).write_text(corrected, encoding="utf-8")
+                touched.append(os.path.relpath(agent_md_path, root))
+
+        return touched
+
     def load_sections(
         self, result: DiscoveryResult, root: str, token_budget: int
     ) -> list[LoadedSection]:

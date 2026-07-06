@@ -22,11 +22,11 @@ constants.py — Configuration limits and guardrails for indexing and discovery
   SOURCE_EXTENSIONS (constant) — 27-54 — File extensions treated as indexable source code
 file_index_service.py — Primary service orchestrating agent.md generation and discovery
   AgentMdGenerationError (class) — 22-23 — Raised when agent.md generation fails all retries
-  FileIndexService (class) — 26-317 — Manages agent.md generation, discovery, loading, and incremental updates
+  FileIndexService (class) — 26-353 — Manages agent.md generation, discovery, loading, and incremental updates
   generate_all (method) — 31-41 — Generate agent.md for every source directory bottom-up
   read_repo_map (method) — 43-72 — Concatenate all agent.md files into a single repo index
-  load_sections (method) — 74-112 — Load source content for discovered sections respecting token budget
-  update_after_task (method) — 114-168 — Incrementally update agent.md for files changed by a task
+  load_sections (method) — 99-137 — Load source content for discovered sections respecting token budget
+  update_after_task (method) — 139-204 — Incrementally update agent.md for files changed by a task
 git_utils.py — Git operations for tracking file changes
   get_changed_files (function) — 6-35 — Return repo-relative paths of files changed vs HEAD
 path_safety.py — Safe path resolution preventing directory traversal

@@ -330,6 +330,65 @@ class TestReadRepoMap:
         assert repo_map == ""
 
 
+# ── resync_line_ranges ─────────────────────────────────────────────────────────
+
+class TestResyncLineRanges:
+    def test_corrects_stale_line_range_without_llm(self, service, mock_client, tmp_path):
+        source = "\n".join(["# padding"] * 10 + ["def real_function():", "    pass"])
+        (tmp_path / "task.py").write_text(source)
+        (tmp_path / "agent.md").write_text(
+            "## Files\n\ntask.py — Task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        content = (tmp_path / "agent.md").read_text()
+        assert "real_function (function) — 11-12" in content
+        assert touched == ["agent.md"]
+        mock_client.call_single.assert_not_called()
+
+    def test_no_op_when_already_correct(self, service, tmp_path):
+        (tmp_path / "task.py").write_text("def real_function():\n    pass\n")
+        original = (
+            "## Files\n\ntask.py — Task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+        (tmp_path / "agent.md").write_text(original)
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        assert touched == []
+        assert (tmp_path / "agent.md").read_text() == original
+
+    def test_scans_subdirectories(self, service, tmp_path):
+        sub = tmp_path / "models"
+        sub.mkdir()
+        source = "\n".join(["# padding"] * 5 + ["def foo():", "    pass"])
+        (sub / "task.py").write_text(source)
+        (sub / "agent.md").write_text(
+            "## Files\n\ntask.py — Task module\n  foo (function) — 1-2 — does a thing\n"
+        )
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        assert touched == [os.path.join("models", "agent.md")]
+        content = (sub / "agent.md").read_text()
+        assert "foo (function) — 6-7" in content
+
+    def test_gitignore_excluded_directory_skipped(self, service, tmp_path):
+        (tmp_path / ".gitignore").write_text("ignored\n")
+        ignored = tmp_path / "ignored"
+        ignored.mkdir()
+        (ignored / "agent.md").write_text(
+            "## Files\n\ntask.py — Task module\n  foo (function) — 1-2 — does a thing\n"
+        )
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        assert touched == []
+
+
 # ── load_sections ─────────────────────────────────────────────────────────────
 
 from haive.models.discovery import DiscoveredSection, DiscoveryResult

@@ -22,9 +22,9 @@ discovery.py — Repository discovery models for loading relevant source section
   DiscoveryResult (class) — 17-19 — Result containing discovered sections and status
   LoadedSection (class) — 22-25 — Loaded source content for a discovered section with reason
 enums.py — Task status, agent role, and complexity enumerations
-  TaskStatus (class) — 4-10 — Enum of task lifecycle states (pending, in_progress, complete, blocked, skipped)
-  AgentRole (class) — 13-23 — Enum of agent roles (scaffold, implementation, refactoring, reviewers, etc.)
-  Complexity (class) — 26-29 — Enum of task complexity levels (low, medium, high)
+  TaskStatus (class) — 4-11 — Enum of task lifecycle states (pending, in_progress, complete, blocked, skipped)
+  AgentRole (class) — 14-24 — Enum of agent roles (scaffold, implementation, refactoring, reviewers, etc.)
+  Complexity (class) — 27-30 — Enum of task complexity levels (low, medium, high)
 orchestrator.py — Orchestrator input/output models for task coordination
   OrchestratorTaskView (class) — 9-22 — Read-only task view for orchestrator with status and verdict
   OrchestratorInput (class) — 25-32 — Input to orchestrator containing project, tasks, and comments
@@ -41,6 +41,6 @@ task.py — Task, project, and execution record domain models
   AttemptLogEntry (class) — 35-38 — Log entry tracking attempt tier and reason
   VerdictSummary (class) — 41-44 — Stored verdict summary with passed status and reason
   TokenUsage (class) — 47-50 — Token usage metrics for LLM calls
-  TaskExecutionRecord (class) — 53-66 — Complete execution record with verdict, attempts, model, and metrics
+  TaskExecutionRecord (class) — 53-67 — Complete execution record with verdict, attempts, model, and metrics
 verdict.py — Review verdict model (duplicate/legacy definition)
   ReviewVerdict (class) — 4-8 — Review verdict with passed and uncertain flags

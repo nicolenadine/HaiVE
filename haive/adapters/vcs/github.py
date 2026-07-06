@@ -107,7 +107,22 @@ class GitHubVCSAdapter:
         return str(pr.number)
 
     def merge_pr(self, pr_id: str) -> None:
+        """Merge a PR immediately if possible, else enable auto-merge for later.
+
+        A repo with no required status checks makes every PR immediately
+        mergeable ("clean" state) — GitHub's enablePullRequestAutoMerge
+        mutation rejects those with "Pull request is in clean status", since
+        auto-merge exists only to wait on pending checks. Trying a direct
+        merge first handles that common case; falling back to enabling
+        auto-merge still covers repos where checks are pending.
+        """
         pr = self._repo_obj.get_pull(int(pr_id))
+        try:
+            pr.merge(merge_method="squash")
+            return
+        except github.GithubException as direct_merge_exc:
+            direct_merge_message = str(direct_merge_exc.data.get("message", direct_merge_exc))
+
         pr_node_id: str = pr.raw_data["node_id"]
         mutation = """
         mutation($pullRequestId: ID!) {
@@ -117,7 +132,13 @@ class GitHubVCSAdapter:
           }) { pullRequest { number } }
         }
         """
-        self._graphql(mutation, {"pullRequestId": pr_node_id})
+        try:
+            self._graphql(mutation, {"pullRequestId": pr_node_id})
+        except RuntimeError as enable_exc:
+            raise RuntimeError(
+                f"Direct merge failed ({direct_merge_message}); "
+                f"enabling auto-merge also failed ({enable_exc})"
+            ) from enable_exc
 
     def add_pr_comment(self, pr_id: str, body: str) -> None:
         self._repo_obj.get_pull(int(pr_id)).create_issue_comment(body)

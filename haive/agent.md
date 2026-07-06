@@ -11,7 +11,7 @@ cli.py — CLI entry point with commands for indexing, discovering, loading, and
   index (function) — 151-202 — Generate or validate per-directory agent.md index files
   discover (function) — 208-269 — Run Code Discovery Agent to find relevant files for a task
   load (function) — 275-341 — Discover relevant files and load their source content
-  run (function) — 347-595 — Execute haive harness for a project milestone across waves
+  run (function) — 347-634 — Execute haive harness for a project milestone across waves
 adapters/ — Project management and version control adapter interfaces for PM and VCS platforms
 config/ — Configuration management for named environments with validation and editing
 discovery/ — Agent.md indexing, code discovery navigation, and file content loading services
