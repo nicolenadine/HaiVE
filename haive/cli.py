@@ -80,6 +80,17 @@ def config_list() -> None:
         typer.echo(f"{marker}{name}")
 
 
+@config_app.command("delete")
+def config_delete(name: str = typer.Argument(..., help="Name of the config to delete.")) -> None:
+    """Delete a named config."""
+    try:
+        ConfigManager.delete(name)
+        typer.echo(f"Deleted config '{name}'.")
+    except (FileNotFoundError, ValueError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+
 # ── Preflight checks ──────────────────────────────────────────────────────────
 
 def _check_git_on_path() -> None:
