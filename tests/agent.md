@@ -30,8 +30,8 @@ test_orchestrator_examples.py — Example-based milestone classification and sel
   TestExampleLibraryLoading (class) — 154-197 — YAML parsing and validation of planning examples
   TestMilestoneClassifier (class) — 204-243 — Tag-based milestone classification from text
 test_output_validator.py — Agent output schema validation and JSON extraction
-  TestJsonExtraction (class) — 41-66 — Robust JSON parsing from wrapped, embedded, or bare formats
-  TestSchemaValidation (class) — 71-97 — Pydantic model validation with empty-list rejection
+  TestJsonExtraction (class) — 41-87 — Robust JSON parsing from wrapped, embedded, or bare formats
+  TestSchemaValidation (class) — 92-118 — Pydantic model validation with empty-list rejection
 test_pm_adapter.py — GitHub project management adapter for task CRUD and field ops
   TestGetProject (class) — 131-165 — Milestone to Project conversion with derived branch names
   TestCreateTask (class) — 451-541 — GraphQL-based task creation with field value setting

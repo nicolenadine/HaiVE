@@ -17,8 +17,8 @@ example_tags.py — Known tags and tag classification configuration for example 
   KNOWN_TAGS (constant) — 3-17 — Frozenset of valid tag names for orchestrator examples
 examples.yaml — YAML library of planning patterns and example task decompositions for milestones
 orchestrator.py — Main orchestrator loop orchestrating task planning and recovery decisions
-  OrchestratorStalledError (class) — 18-24 — Exception for safety mechanisms preventing infinite loops
-  Orchestrator (class) — 37-96 — Runs planning loop with LLM, example selection, and recovery validation
+  OrchestratorStalledError (class) — 17-23 — Exception for safety mechanisms preventing infinite loops
+  Orchestrator (class) — 26-87 — Runs planning loop with LLM, example selection, and recovery validation
 orchestrator_prompt.py — Prompt template generation for the orchestrator LLM
   build_orchestrator_prompt (function) — 3-178 — Generates system prompt for task planning and recovery
 task_scheduler.py — Concurrent task execution scheduler respecting dependency ordering

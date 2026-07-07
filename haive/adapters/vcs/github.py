@@ -98,12 +98,15 @@ class GitHubVCSAdapter:
             ) from e
 
     def create_pr(self, title: str, body: str, head_branch: str, base_branch: str) -> str:
-        pr = self._repo_obj.create_pull(
-            title=title,
-            body=body,
-            head=head_branch,
-            base=base_branch,
-        )
+        try:
+            pr = self._repo_obj.create_pull(
+                title=title,
+                body=body,
+                head=head_branch,
+                base=base_branch,
+            )
+        except github.GithubException as exc:
+            raise RuntimeError(f"Failed to create PR ({head_branch} -> {base_branch}): {exc}") from exc
         return str(pr.number)
 
     def merge_pr(self, pr_id: str) -> None:

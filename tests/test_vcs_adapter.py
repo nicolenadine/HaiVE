@@ -196,6 +196,15 @@ class TestCreatePR:
             base="main",
         )
 
+    def test_github_error_raises_runtime_error(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.create_pull.side_effect = github.GithubException(
+            422, {"message": "No commits between main and main"}, None
+        )
+
+        with pytest.raises(RuntimeError, match="No commits between main and main"):
+            adapter.create_pr("My PR", "Body text", "main", "main")
+
 
 # ---------------------------------------------------------------------------
 # TestMergePR

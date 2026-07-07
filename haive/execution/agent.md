@@ -9,9 +9,9 @@ read_file_tool.py — Tool integration for LLMs to request repo files during exe
   run_tool_loop (function) — 83-143 — Executes LLM tool-calling loop with file read support and budget management
 output_validator.py — Validates and extracts JSON from LLM outputs against role-specific schemas
   OutputValidationError (class) — 21-27 — Exception for schema validation failures on agent output
-  OutputValidator (class) — 46-88 — Parses and validates raw LLM output against registered agent role schemas
+  OutputValidator (class) — 46-113 — Parses and validates raw LLM output against registered agent role schemas
   validate (method) — 49-61 — Extracts and validates JSON output against the schema for a given agent role
-  extract_json (method) — 64-88 — Finds JSON object in raw text via bare object, markdown fence, or brace scanning
+  extract_json (method) — 64-113 — Finds JSON object in raw text via bare object, markdown fence, or brace scanning
 review_agent.py — LLM-as-judge that evaluates task agent outputs against acceptance criteria with escalation
   ReviewAgent (class) — 34-198 — Validates agent output, reads original files, and performs multi-tier review with on-demand file access
   review (method) — 59-103 — Reviews agent output against criteria, escalating through REVIEWER_MODELS on uncertainty
