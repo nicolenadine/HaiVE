@@ -1,7 +1,6 @@
 """Tests for the haive run CLI command (Step 23)."""
 from __future__ import annotations
 
-import subprocess
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +67,7 @@ def _base_mocks() -> dict:
 
     mock_vcs = MagicMock()
     mock_vcs.create_project_pr.return_value = "https://github.com/owner/repo/pull/1"
+    mock_vcs.branch_has_new_commits.return_value = True
 
     mock_state = MagicMock()
     mock_state.last_run_at = None
@@ -137,7 +137,6 @@ def _run_with_mocks(
         stack.enter_context(patch("haive.observability.spans.run_span", return_value=_mock_span_cm()))
         stack.enter_context(patch("haive.orchestration.example_library.ExampleLibrary"))
         stack.enter_context(patch("haive.orchestration.task_view_builder.TaskViewBuilder"))
-        mock_sp = stack.enter_context(patch("subprocess.check_output"))
         stack.enter_context(patch("os.getcwd", return_value=root))
         agent_mds = [Path("/fake/agent.md")] if agent_md_exists else []
         stack.enter_context(patch("pathlib.Path.rglob", return_value=iter(agent_mds)))
@@ -145,7 +144,6 @@ def _run_with_mocks(
 
         reg_cls.load.return_value = m["registry"]
         tc_cls.from_settings.return_value = m["tier_config"]
-        mock_sp.return_value = b"step-23-cli\n"
 
         return runner.invoke(app, args, catch_exceptions=catch_exceptions)
 
@@ -227,6 +225,27 @@ class TestRunDoneTrue:
         m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
         _run_with_mocks(m)
         m["scheduler"].start.assert_not_called()
+
+    def test_done_true_with_nothing_ahead_skips_pr(self):
+        m = _base_mocks()
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = False
+        result = _run_with_mocks(m)
+        assert result.exit_code == 0
+        m["vcs"].create_project_pr.assert_not_called()
+        assert "nothing further to merge" in result.output.lower()
+
+
+class TestRunProjectBranch:
+    def test_ensures_project_branch_from_project_data(self):
+        m = _base_mocks()
+        _run_with_mocks(m)
+        m["vcs"].ensure_branch.assert_called_once_with("haive/project-42", "main")
+
+    def test_skips_ensure_branch_in_dry_run(self):
+        m = _base_mocks()
+        _run_with_mocks(m, extra_args=["--dry-run"])
+        m["vcs"].ensure_branch.assert_not_called()
 
 
 class TestRunTaskCreation:

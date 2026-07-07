@@ -398,7 +398,6 @@ def run(
     the orchestrator has no further automatic action to take.
     """
     import os
-    import subprocess
     from datetime import datetime, timezone
     from pathlib import Path
 
@@ -456,17 +455,21 @@ def run(
         discovery_agent = CodeDiscoveryAgent(model_client, tier_config.low)
         file_index = FileIndexService(model_client, tier_config.low)
 
+        # Each milestone gets its own dedicated, long-lived branch — created
+        # once and reused across every `haive run` invocation for it, rather
+        # than derived from whatever happens to be locally checked out.
+        # Every task branches off it and merges into it; only the final
+        # "project complete" PR (see the done handling below) ever touches
+        # main.
+        project_data = pm.get_project(milestone_id)
+        project_branch = project_data.project_branch
+        if not dry_run:
+            vcs.ensure_branch(project_branch, "main")
+
         if not dry_run:
             resynced = file_index.resync_line_ranges(root)
             if resynced:
                 typer.echo(f"Corrected stale line ranges in {len(resynced)} agent.md file(s): {', '.join(resynced)}")
-
-        try:
-            project_branch = subprocess.check_output(
-                ["git", "branch", "--show-current"], cwd=root
-            ).decode().strip() or "main"
-        except subprocess.CalledProcessError:
-            project_branch = "main"
 
         example_library: ExampleLibrary | None = None
         examples_path = Path(examples)
@@ -488,8 +491,6 @@ def run(
             auto_merge=settings.auto_merge,
             on_status=typer.echo,
         )
-
-        project_data = pm.get_project(milestone_id)
 
         with run_span(milestone_id):
             for wave_num in range(1, settings.max_waves_per_run + 1):
@@ -571,13 +572,19 @@ def run(
                         return
 
                     if output.done:
-                        pr_url = vcs.create_project_pr(
-                            project_branch,
-                            "main",
-                            f"Project complete: {project_data.title}",
-                            "All tasks complete — merging project branch to main.",
-                        )
-                        typer.echo(f"\nProject complete. PR created: {pr_url}")
+                        if vcs.branch_has_new_commits("main", project_branch):
+                            pr_url = vcs.create_project_pr(
+                                project_branch,
+                                "main",
+                                f"Project complete: {project_data.title}",
+                                "All tasks complete — merging project branch to main.",
+                            )
+                            typer.echo(f"\nProject complete. PR created: {pr_url}")
+                        else:
+                            typer.echo(
+                                "\nProject complete. All changes were already merged into main "
+                                "— nothing further to merge."
+                            )
                         return
 
                     # Create new tasks and resolve "new:N" dependency refs.

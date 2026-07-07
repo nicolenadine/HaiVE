@@ -593,3 +593,15 @@ Format per entry:
 **Rationale:** A file list constraint is semantically meaningful and checkable. The Review Agent can deterministically verify which files were changed. A line count limit is arbitrary (what is the right number?), not semantically linked to task scope, and harder to enforce. Relying on the agent to self-limit is not reliable.
 
 **Tradeoff:** A refactoring task that legitimately needs to touch more files than anticipated must be re-decomposed into multiple tasks by the orchestrator. This is the correct behavior — scope should be made explicit upfront, not discovered mid-execution.
+
+---
+
+### One dedicated branch per milestone, wired from the data model instead of local git state
+
+**Decision:** `haive run` derives `project_branch` from `Project.project_branch` (already computed by `GitHubPMAdapter.get_project()` as `f"haive/project-{project_id}"`), created once via `GitHubVCSAdapter.ensure_branch()` and reused across every `haive run` invocation for that milestone. Every task branches off it and merges into it; only the final "project complete" PR — never auto-merged, always left for human review — touches `main`.
+
+**Alternatives:** Keep deriving `project_branch` from `git branch --show-current` (status quo); run every task directly against `main` with no intermediate branch at all.
+
+**Rationale:** `Project.project_branch` already existed in the data model but was never read anywhere — `cli.py`'s `run()` command derived `project_branch` from whatever was locally checked out instead. In practice this meant one ad-hoc branch (`step-23-cli`) silently became the shared project branch for three unrelated milestones over several weeks, and once that branch was finally merged and deleted, `project_branch` degraded to `"main"` itself — producing a PR from `main` to `main` that GitHub correctly rejected. Wiring up the branch the data model already defines gives one clean, reviewable PR per milestone, keeps `main` protected for the milestone's entire duration, and removes the failure class entirely (a fresh project branch is only ever compared against `main`, never against itself).
+
+**Tradeoff:** `ensure_branch()` must never behave like `create_branch()` (used for disposable per-task branches, which force-resets local state via `git checkout -B`) — a project branch accumulates task merges across many `haive run` invocations for the same milestone, so resetting it would silently discard that history. `branch_has_new_commits()` (checked proactively before the final PR, via `compare().ahead_by`) also covers the case where a milestone's project branch, freshly created off `main`'s current tip, has nothing new yet — not just the specific bug that surfaced this.

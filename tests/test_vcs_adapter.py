@@ -382,6 +382,72 @@ class TestDeleteBranch:
 
 
 # ---------------------------------------------------------------------------
+# TestEnsureBranch
+# ---------------------------------------------------------------------------
+
+class TestEnsureBranch:
+    def test_syncs_existing_branch_instead_of_recreating(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_branch.return_value = MagicMock()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.ensure_branch("haive/project-12", "main")
+
+        adapter._repo_obj.get_branch.assert_called_once_with("haive/project-12")
+        # checkout_branch's calls: checkout then pull — never create_git_ref
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0] == call(
+            ["git", "checkout", "haive/project-12"], check=True, capture_output=True
+        )
+        adapter._repo_obj.create_git_ref.assert_not_called()
+
+    def test_creates_branch_when_missing(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_branch.side_effect = [
+            github.GithubException(404, {"message": "Not Found"}, None),
+            MagicMock(commit=MagicMock(sha="abc123")),  # create_branch's own get_branch(base) call
+        ]
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.ensure_branch("haive/project-12", "main")
+
+        adapter._repo_obj.create_git_ref.assert_called_once_with(
+            ref="refs/heads/haive/project-12", sha="abc123",
+        )
+
+    def test_non_404_error_propagates(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_branch.side_effect = github.GithubException(
+            500, {"message": "Server Error"}, None
+        )
+
+        with pytest.raises(github.GithubException):
+            adapter.ensure_branch("haive/project-12", "main")
+
+
+# ---------------------------------------------------------------------------
+# TestBranchHasNewCommits
+# ---------------------------------------------------------------------------
+
+class TestBranchHasNewCommits:
+    def test_true_when_ahead(self):
+        adapter = _make_adapter()
+        comparison = MagicMock(ahead_by=3)
+        adapter._repo_obj.compare.return_value = comparison
+
+        assert adapter.branch_has_new_commits("main", "haive/project-12") is True
+        adapter._repo_obj.compare.assert_called_once_with("main", "haive/project-12")
+
+    def test_false_when_not_ahead(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.compare.return_value = MagicMock(ahead_by=0)
+
+        assert adapter.branch_has_new_commits("main", "haive/project-12") is False
+
+
+# ---------------------------------------------------------------------------
 # TestVCSAdapterBoundaries
 # ---------------------------------------------------------------------------
 

@@ -17,8 +17,8 @@ cli.py — Command-line interface for indexing, discovering, loading, executing 
   index (function) — 162-213 — Generates or validates per-directory agent.md index files
   discover (function) — 219-280 — Runs code discovery agent to find relevant code sections for a task
   load (function) — 286-352 — Combines discovery and loading to assemble context for a task
-  run (function) — 358-663 — Main orchestration loop executing tasks across waves with planning and review
-  prune_branches (function) — 669-726 — Deletes haive task branches whose PRs have been merged
+  run (function) — 358-670 — Main orchestration loop executing tasks across waves with planning and review
+  prune_branches (function) — 676-733 — Deletes haive task branches whose PRs have been merged
 adapters/ — Project management and version control system adapter interfaces and implementations
 config/ — Configuration management for named configs and environment settings
 discovery/ — Code discovery agent and agent.md file indexing service for repository navigation

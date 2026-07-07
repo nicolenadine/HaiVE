@@ -165,3 +165,32 @@ class GitHubVCSAdapter:
 
     def delete_branch(self, branch_name: str) -> None:
         self._repo_obj.get_git_ref(f"heads/{branch_name}").delete()
+
+    def ensure_branch(self, branch_name: str, base_branch: str) -> None:
+        """Create branch_name off base_branch if it doesn't exist yet, else
+        sync the local checkout to its current remote state.
+
+        Unlike create_branch() (used for fresh, disposable per-task branches,
+        which force-resets local state via `git checkout -B`), this must
+        never discard existing history — a project branch accumulates task
+        merges across many `haive run` invocations for the same milestone.
+        """
+        try:
+            self._repo_obj.get_branch(branch_name)
+            exists = True
+        except github.GithubException as exc:
+            if exc.status != 404:
+                raise
+            exists = False
+
+        if exists:
+            self.checkout_branch(branch_name)
+        else:
+            self.create_branch(branch_name, base_branch)
+
+    def branch_has_new_commits(self, base_branch: str, head_branch: str) -> bool:
+        """True if head_branch has commits not on base_branch — i.e. there's
+        something to merge. Checked proactively before creating the final
+        project PR, rather than reactively parsing a GitHub error message.
+        """
+        return self._repo_obj.compare(base_branch, head_branch).ahead_by > 0
