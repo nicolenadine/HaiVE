@@ -10,7 +10,7 @@ from haive.llm.model_client import ModelClient
 from haive.llm.model_response import ModelResponse
 from haive.llm.tier import Tier
 from haive.llm.token_counter import TokenCounter
-from haive.models.agent_output import ReviewAgentOutput
+from haive.models.agent_output import ReviewAgentOutput, ScaffoldAgentOutput
 from haive.models.context_request import ContextRequest
 from haive.models.discovery import LoadedSection
 from haive.models.enums import AgentRole
@@ -164,6 +164,27 @@ class ReviewAgent:
             tokens = remaining_budget
         return text, tokens
 
+    def _read_original_contents(self, agent_output: BaseModel) -> dict[str, str]:
+        """Read the current on-disk content of every file the submission edits.
+
+        Gives the reviewer real ground truth to diff the proposal against,
+        independent of whatever loaded_sections happened to include — closes
+        the blind spot where the reviewer's only view of "the original" was
+        the same (possibly truncated) context the code editor saw.
+        """
+        result: dict[str, str] = {}
+        for path_str in self._edited_paths(agent_output):
+            safe = resolve_within_root(path_str, self._root)
+            if safe is not None and safe.is_file():
+                result[path_str] = safe.read_text(encoding="utf-8")
+        return result
+
+    @staticmethod
+    def _edited_paths(agent_output: BaseModel) -> list[str]:
+        if isinstance(agent_output, ScaffoldAgentOutput):
+            return [f.path for f in agent_output.files]
+        return [e.path for e in agent_output.edits]  # type: ignore[attr-defined]
+
     # ── prompt building ───────────────────────────────────────────────────────
 
     def _build_prompt(
@@ -187,6 +208,14 @@ class ReviewAgent:
             parts.append("\n## Code Context\n")
             for s in loaded_sections:
                 parts.append(f"### {s.file}\n\n{s.reason}\n\n```\n{s.source.rstrip()}\n```")
+
+        original_contents = self._read_original_contents(agent_output)
+        if original_contents:
+            parts.append(
+                "\n## Original File Content (full, current on-disk state before this edit)\n"
+            )
+            for path, content in original_contents.items():
+                parts.append(f"### {path}\n\n```\n{content.rstrip()}\n```")
 
         parts.append("\n## Agent Output\n")
         parts.append(f"```json\n{agent_output.model_dump_json(indent=2)}\n```")

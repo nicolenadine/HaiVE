@@ -192,6 +192,37 @@ class TestPromptContent:
         assert "haive/client.py" in prompt
         assert "class Client: pass" in prompt
 
+    def test_original_file_content_included_for_edited_path(self, tmp_path):
+        (tmp_path / "haive").mkdir()
+        (tmp_path / "haive" / "client.py").write_text("class Client:\n    def old_method(self): pass\n")
+        client = MagicMock(spec=ModelClient)
+        client.call.return_value = make_response(PASSING_PAYLOAD)
+        make_agent(client, root=str(tmp_path)).review(
+            make_task(), make_agent_output(), [], "found", "",
+        )
+        prompt = client.call.call_args.kwargs["prompt"]
+        assert "Original File Content" in prompt
+        assert "old_method" in prompt
+
+    def test_no_original_file_section_when_file_does_not_exist_yet(self):
+        client = MagicMock(spec=ModelClient)
+        client.call.return_value = make_response(PASSING_PAYLOAD)
+        prompt = self._captured_prompt(client)  # default root="/tmp", file doesn't exist
+        assert "Original File Content" not in prompt
+
+    def test_scaffold_new_files_have_no_original_content(self, tmp_path):
+        from haive.models.agent_output import FileToCreate, ScaffoldAgentOutput
+        client = MagicMock(spec=ModelClient)
+        client.call.return_value = make_response(PASSING_PAYLOAD)
+        scaffold_output = ScaffoldAgentOutput(
+            files=[FileToCreate(path="haive/new_module.py", content="x = 1")], notes="",
+        )
+        make_agent(client, root=str(tmp_path)).review(
+            make_task(), scaffold_output, [], "empty_expected", "",
+        )
+        prompt = client.call.call_args.kwargs["prompt"]
+        assert "Original File Content" not in prompt
+
 
 # ── ReviewVerdict model ───────────────────────────────────────────────────────
 
