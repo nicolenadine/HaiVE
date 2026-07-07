@@ -65,6 +65,27 @@ class TestJsonExtraction:
         assert exc_info.value.role == AgentRole.IMPLEMENTATION_AGENT
         assert "not json at all" in exc_info.value.raw
 
+    def test_incidental_brace_in_prose_before_real_json_is_skipped(self):
+        # Regression test: a model reasoning out loud can quote code containing
+        # braces (an f-string like `{wave_num}`) before its real JSON answer.
+        # That incidental span brace-balances but isn't valid JSON, and must
+        # not be mistaken for the answer.
+        raw = (
+            "Let me identify what to change first.\n"
+            '1. `typer.secho(f"\\n--- Wave {wave_num} ---")`\n\n'
+            f"{json.dumps(VALID_CODE_EDITOR)}"
+        )
+        result = OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+
+    def test_multiple_incidental_braces_before_real_json(self):
+        raw = (
+            "Consider `{unquoted: key}` and `{another bad one}` as examples, then:\n\n"
+            f"{json.dumps(VALID_CODE_EDITOR)}"
+        )
+        result = OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+
 
 # ── schema validation ─────────────────────────────────────────────────────────
 

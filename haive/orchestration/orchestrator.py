@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
-
 from pydantic import ValidationError
 
+from haive.execution.output_validator import OutputValidator
 from haive.llm.errors import APIError
 from haive.llm.model_client import ModelClient
 from haive.llm.tier_config import TierConfig
@@ -22,16 +21,6 @@ class OrchestratorStalledError(RuntimeError):
     instead of treating this as a bug — it's a safety mechanism (empty output,
     or a recovery attempt hitting max_recovery_depth) working as designed.
     """
-
-
-def _extract_json(content: str) -> str:
-    stripped = content.strip()
-    if stripped.startswith("{"):
-        return stripped
-    m = re.search(r"```(?:json)?\s*\n(.*?)\n```", stripped, re.DOTALL)
-    if m:
-        return m.group(1).strip()
-    raise APIError("Could not extract JSON from orchestrator response.")
 
 
 class Orchestrator:
@@ -66,7 +55,9 @@ class Orchestrator:
             max_tokens=_ORCHESTRATOR_MAX_OUTPUT_TOKENS,
         )
 
-        json_str = _extract_json(response.content)
+        json_str = OutputValidator.extract_json(response.content)
+        if json_str is None:
+            raise APIError("Could not extract JSON from orchestrator response.")
 
         try:
             output = OrchestratorOutput.model_validate_json(json_str)

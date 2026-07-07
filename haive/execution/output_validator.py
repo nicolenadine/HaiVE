@@ -62,27 +62,52 @@ class OutputValidator:
 
     @staticmethod
     def extract_json(raw: str) -> str | None:
+        """Locates the model's JSON answer, tolerating prose before or after it.
+
+        A model that reasons out loud before its final answer can leave
+        incidental "{...}" earlier in the text — an f-string it's quoting, a
+        dict literal it's describing — that brace-balances but isn't valid
+        JSON. Trusting the first brace-balanced span (as a naive scan would)
+        picks up that false positive instead of the real answer. Every
+        candidate span is validated with json.loads before being accepted;
+        a span that merely balances but doesn't parse is skipped in favor of
+        the next one.
+        """
         text = raw.strip()
 
-        # Strategy 1: bare JSON object
-        if text.startswith("{"):
-            return text
+        candidates: list[str] = []
 
-        # Strategy 2: JSON inside a markdown fence
+        # Markdown-fenced JSON, if present, is checked first — it's an
+        # explicit signal of intent, not just an incidental brace pair.
         match = _FENCE_RE.search(text)
         if match:
-            return match.group(1).strip()
+            candidates.append(match.group(1).strip())
 
-        # Strategy 3: brace scan for outermost { ... }
-        start = text.find("{")
-        if start >= 0:
+        search_from = 0
+        while True:
+            start = text.find("{", search_from)
+            if start < 0:
+                break
             depth = 0
+            end = None
             for i, ch in enumerate(text[start:], start):
                 if ch == "{":
                     depth += 1
                 elif ch == "}":
                     depth -= 1
                     if depth == 0:
-                        return text[start : i + 1]
+                        end = i
+                        break
+            if end is None:
+                break
+            candidates.append(text[start : end + 1])
+            search_from = start + 1
+
+        for candidate in candidates:
+            try:
+                json.loads(candidate)
+                return candidate
+            except (ValueError, TypeError):
+                continue
 
         return None
