@@ -27,6 +27,8 @@ from haive.registry.agent_registry import AgentRegistry
 
 _SCAFFOLD_ROLES: frozenset[AgentRole] = frozenset({AgentRole.SCAFFOLD_AGENT})
 _MAX_API_ERRORS = 3
+_MIN_LINES_FOR_SHRINKAGE_CHECK = 20
+_MAX_ALLOWED_SHRINKAGE = 0.5
 
 
 def _utcnow() -> datetime:
@@ -175,6 +177,19 @@ class TaskExecutor:
                         )
                     )
                     retry_feedback = [str(exc)]
+                    continue
+
+                shrinkage_reason = _check_for_catastrophic_deletion(agent_output, self._root)
+                if shrinkage_reason is not None:
+                    self._on_status(f"  [#{task.task_id}] content check failed — retrying")
+                    record.attempt_log.append(
+                        AttemptLogEntry(
+                            tier=complexity,
+                            attempt=attempt_num,
+                            reason=shrinkage_reason,
+                        )
+                    )
+                    retry_feedback = [shrinkage_reason]
                     continue
 
                 self._on_status(f"  [#{task.task_id}] reviewing output  [{response.model_used}]")
@@ -366,6 +381,36 @@ class TaskExecutor:
 
 
 # ── module-level helpers ──────────────────────────────────────────────────────
+
+def _check_for_catastrophic_deletion(agent_output: object, root: str) -> str | None:
+    """Flag a full-file edit that silently drops most of an existing file's content.
+
+    A code-editor submission replaces a file's entire content, so if the
+    model's context was truncated (stale index, budget limits, or otherwise)
+    it can "complete" the file using only what it saw, discarding the rest.
+    Checked deterministically here rather than left to the reviewer, whose
+    context comes from the same loaded_sections and has the same blind spot.
+    """
+    if isinstance(agent_output, ScaffoldAgentOutput):
+        return None
+    for edit in agent_output.edits:  # type: ignore[attr-defined]
+        path = Path(root) / edit.path
+        if not path.is_file():
+            continue
+        original_lines = path.read_text(encoding="utf-8").count("\n") + 1
+        if original_lines < _MIN_LINES_FOR_SHRINKAGE_CHECK:
+            continue
+        new_lines = edit.content.count("\n") + 1
+        if new_lines < original_lines * _MAX_ALLOWED_SHRINKAGE:
+            return (
+                f"Edit to {edit.path} drops it from {original_lines} to {new_lines} lines — "
+                f"more than {int((1 - _MAX_ALLOWED_SHRINKAGE) * 100)}% smaller. This usually "
+                "means the edit was built from incomplete context and is missing content that "
+                "still belongs in the file. Submit a complete replacement that preserves "
+                "everything not being intentionally changed or removed."
+            )
+    return None
+
 
 def _apply_output(agent_output: object, root: str) -> list[str]:
     if isinstance(agent_output, ScaffoldAgentOutput):

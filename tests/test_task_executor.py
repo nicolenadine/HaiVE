@@ -365,6 +365,81 @@ class TestRetry:
         assert len(schema_entries) == 1
 
 
+# ── catastrophic deletion check ────────────────────────────────────────────────
+
+class TestCatastrophicDeletionCheck:
+    def test_large_deletion_skips_reviewer_and_retries(self, tmp_path):
+        executor = make_executor(tmp_path, low_attempts=2)
+        svc = make_services(tmp_path)
+
+        existing = "\n".join(f"line {i}" for i in range(40))
+        (tmp_path / "haive").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "haive" / "client.py").write_text(existing)
+
+        shrinking_response = ModelResponse(
+            content=json.dumps({
+                "edits": [{"path": "haive/client.py", "content": "x = 1"}],
+                "notes": "",
+            }),
+            model_used="test-model", token_usage=None,
+        )
+        # Second attempt must not itself trip the shrinkage check (still under 40 lines on disk).
+        recovering_response = ModelResponse(
+            content=json.dumps({
+                "edits": [{"path": "haive/client.py", "content": "\n".join(f"line {i}" for i in range(25))}],
+                "notes": "",
+            }),
+            model_used="test-model", token_usage=None,
+        )
+        executor._model_client.call.side_effect = [shrinking_response, recovering_response]
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        record = executor.run(make_task(), **svc)
+
+        # reviewer skipped entirely on the shrinking attempt, only called for the retry
+        assert executor._review_agent.review.call_count == 1
+        assert record.total_attempts == 2
+        shrink_entries = [e for e in record.attempt_log if "drops it from" in e.reason]
+        assert len(shrink_entries) == 1
+
+    def test_files_under_the_line_threshold_are_exempt(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        (tmp_path / "haive").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "haive" / "client.py").write_text("line1\nline2\n")
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        record = executor.run(make_task(), **svc)
+
+        assert record.total_attempts == 1
+        executor._review_agent.review.assert_called_once()
+
+    def test_brand_new_file_is_not_subject_to_the_check(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+        # haive/client.py does not exist on disk yet
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        record = executor.run(make_task(), **svc)
+
+        assert record.total_attempts == 1
+        executor._review_agent.review.assert_called_once()
+
+
 # ── tier escalation ───────────────────────────────────────────────────────────
 
 class TestTierEscalation:
