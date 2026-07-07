@@ -107,6 +107,21 @@ class TestGenerateAll:
 
         assert mock_client.call_single.call_count == AGENT_MD_MAX_GENERATION_RETRIES
 
+    def test_generate_all_corrects_wrong_symbol_line_range(self, service, mock_client, tmp_path):
+        source = "\n".join(["# padding"] * 10 + ["def real_function():", "    pass"])
+        (tmp_path / "task.py").write_text(source)
+        wrong_agent_md = (
+            "## Files\n\n"
+            "task.py — Task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+        mock_client.call_single.return_value = make_turn(wrong_agent_md)
+
+        service.generate_all(str(tmp_path))
+
+        content = (tmp_path / "agent.md").read_text()
+        assert "real_function (function) — 11-12" in content
+
     def test_gitignore_excluded_directory_receives_no_agent_md(
         self, service, mock_client, tmp_path
     ):
@@ -263,6 +278,117 @@ class TestGitignoreHandling:
         assert service._should_skip("haive", [".venv"]) is False
 
 
+# ── read_repo_map ─────────────────────────────────────────────────────────────
+
+class TestReadRepoMap:
+    def test_concatenates_agent_md_from_multiple_directories_root_first(self, service, tmp_path):
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "agent.md").write_text("## Files\n\nsub summary\n")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+
+        assert "root summary" in repo_map
+        assert "sub summary" in repo_map
+        assert repo_map.index("root summary") < repo_map.index("sub summary")
+
+    def test_directory_without_agent_md_is_skipped(self, service, tmp_path):
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        no_index = tmp_path / "no_index"
+        no_index.mkdir()
+        (no_index / "code.py").write_text("x = 1")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+
+        assert "no_index" not in repo_map
+
+    def test_gitignore_excluded_directory_is_skipped(self, service, tmp_path):
+        (tmp_path / ".gitignore").write_text("ignored\n")
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        ignored = tmp_path / "ignored"
+        ignored.mkdir()
+        (ignored / "agent.md").write_text("## Files\n\nignored summary\n")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+
+        assert "ignored summary" not in repo_map
+
+    def test_budget_truncation_keeps_root_drops_deeper_dirs(self, service, tmp_path):
+        (tmp_path / "agent.md").write_text("## Files\n\nroot summary\n")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "agent.md").write_text("## Files\n\n" + ("x" * 5000) + "\n")
+
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=50)
+
+        assert "root summary" in repo_map
+        assert "x" * 5000 not in repo_map
+
+    def test_empty_repo_returns_empty_string(self, service, tmp_path):
+        repo_map = service.read_repo_map(str(tmp_path), token_budget=10_000)
+        assert repo_map == ""
+
+
+# ── resync_line_ranges ─────────────────────────────────────────────────────────
+
+class TestResyncLineRanges:
+    def test_corrects_stale_line_range_without_llm(self, service, mock_client, tmp_path):
+        source = "\n".join(["# padding"] * 10 + ["def real_function():", "    pass"])
+        (tmp_path / "task.py").write_text(source)
+        (tmp_path / "agent.md").write_text(
+            "## Files\n\ntask.py — Task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        content = (tmp_path / "agent.md").read_text()
+        assert "real_function (function) — 11-12" in content
+        assert touched == ["agent.md"]
+        mock_client.call_single.assert_not_called()
+
+    def test_no_op_when_already_correct(self, service, tmp_path):
+        (tmp_path / "task.py").write_text("def real_function():\n    pass\n")
+        original = (
+            "## Files\n\ntask.py — Task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+        (tmp_path / "agent.md").write_text(original)
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        assert touched == []
+        assert (tmp_path / "agent.md").read_text() == original
+
+    def test_scans_subdirectories(self, service, tmp_path):
+        sub = tmp_path / "models"
+        sub.mkdir()
+        source = "\n".join(["# padding"] * 5 + ["def foo():", "    pass"])
+        (sub / "task.py").write_text(source)
+        (sub / "agent.md").write_text(
+            "## Files\n\ntask.py — Task module\n  foo (function) — 1-2 — does a thing\n"
+        )
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        assert touched == [os.path.join("models", "agent.md")]
+        content = (sub / "agent.md").read_text()
+        assert "foo (function) — 6-7" in content
+
+    def test_gitignore_excluded_directory_skipped(self, service, tmp_path):
+        (tmp_path / ".gitignore").write_text("ignored\n")
+        ignored = tmp_path / "ignored"
+        ignored.mkdir()
+        (ignored / "agent.md").write_text(
+            "## Files\n\ntask.py — Task module\n  foo (function) — 1-2 — does a thing\n"
+        )
+
+        touched = service.resync_line_ranges(str(tmp_path))
+
+        assert touched == []
+
+
 # ── load_sections ─────────────────────────────────────────────────────────────
 
 from haive.models.discovery import DiscoveredSection, DiscoveryResult
@@ -386,12 +512,30 @@ class TestUpdateAfterTask:
             "## Files\n\ntask.py — Old task model\nstate.py — State model\n"
         )
 
-        service.update_after_task(["task.py"], str(tmp_path))
+        touched = service.update_after_task(["task.py"], str(tmp_path))
 
         mock_client.call_single.assert_called()
         written = (tmp_path / "agent.md").read_text()
         assert "Updated task model" in written
         assert "state.py — State model" in written
+        assert touched == ["agent.md"]
+
+    def test_update_after_task_corrects_wrong_symbol_line_range(self, tmp_path):
+        mock_client = MagicMock()
+        source = "\n".join(["# padding"] * 10 + ["def real_function():", "    pass"])
+        mock_client.call_single.return_value = make_turn(
+            "## Files\n\ntask.py — Updated task module\n"
+            "  real_function (function) — 1-2 — does a thing\n"
+        )
+        service = FileIndexService(mock_client, MagicMock(spec=Tier))
+
+        (tmp_path / "task.py").write_text(source)
+        (tmp_path / "agent.md").write_text("## Files\n\ntask.py — Old task module\n")
+
+        service.update_after_task(["task.py"], str(tmp_path))
+
+        written = (tmp_path / "agent.md").read_text()
+        assert "real_function (function) — 11-12" in written
 
     def test_deleted_file_strips_entry_without_llm(self, tmp_path):
         mock_client = MagicMock()
@@ -403,13 +547,14 @@ class TestUpdateAfterTask:
         )
 
         # task.py is listed but does not exist on disk → treated as deleted
-        service.update_after_task(["task.py"], str(tmp_path))
+        touched = service.update_after_task(["task.py"], str(tmp_path))
 
         mock_client.call_single.assert_not_called()
         written = (tmp_path / "agent.md").read_text()
         assert "task.py" not in written
         assert "Task (class)" not in written
         assert "state.py — State model" in written
+        assert touched == ["agent.md"]
 
     def test_new_directory_triggers_full_generation(self, tmp_path):
         mock_client = MagicMock()

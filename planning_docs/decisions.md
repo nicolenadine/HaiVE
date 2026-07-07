@@ -330,7 +330,7 @@ Format per entry:
 
 ---
 
-### No orchestrator file tree
+### No orchestrator file tree (superseded — see "Orchestrator receives a repo map, not a file tree")
 
 **Decision:** The orchestrator does not receive a file tree or any file contents.
 
@@ -339,6 +339,20 @@ Format per entry:
 **Rationale:** The orchestrator's job is decomposing objectives into tasks — reasoning about what work needs to be done, not where code lives. File discovery is the Code Discoverer's job. Including a file tree in the orchestrator's context adds tokens on every loop iteration without providing value for task decomposition.
 
 **Tradeoff:** The orchestrator cannot check whether a module already exists before creating a task to scaffold it. If this becomes a practical problem (duplicate file creation), the orchestrator can be given a tool call to check file existence on demand — not a file tree loaded into context by default.
+
+**Superseded:** A live dogfood run showed the real cost of this: the orchestrator wrote a task requiring `on_task_complete` to color "blocked" task lines, unaware that blocked tasks structurally never reach that callback — 8 failed attempts across two issues before a human caught it. Zero codebase awareness turned out to make bad, contradictory task specs cheap to write and expensive to discover. See the new decision below for what replaced this.
+
+---
+
+### Orchestrator receives a repo map, not a file tree
+
+**Decision:** The orchestrator is given a deterministically-assembled "repo map" — the concatenated `agent.md` index tree (per-directory one-line summaries plus top-level symbol/line-range listings), not raw source code and not a live navigation tool. Built by `FileIndexService.read_repo_map()`, capped at a small token budget (`ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET`), root-first so truncation drops the least-central directories before the broad summary.
+
+**Alternatives:** Keep the orchestrator fully blind (status quo, see superseded decision above); give it the same agentic `read_agent_md`/`list_subdirectories` tool-calling loop `CodeDiscoveryAgent` uses so it can navigate on demand.
+
+**Rationale:** `agent.md` is already the cheap, deliberately-summarized layer this system produces for exactly this kind of low-cost awareness — reusing it costs a small, bounded slice of the orchestrator's existing context budget (measured at ~5,900 tokens for this repo's full tree at the time this was written), not a new per-call agentic loop. Since the repo map's content doesn't depend on which specific task is being planned, there's nothing for an agentic tool loop to decide — a static, deterministic assembly is cheaper and simpler than giving the orchestrator its own tool-calling turn.
+
+**Tradeoff:** This only helps the orchestrator avoid contradictions visible at the *structural* level (a symbol/one-line summary). It does not give it deep cross-file behavioral/data-flow awareness — confirmed live: a follow-up task still required the same impossible `on_task_complete`/blocked-status behavior, because the fact that makes it impossible ("blocked tasks bypass this callback entirely") isn't the kind of thing a one-line symbol summary conveys. See "Reviewer may flag acceptance criteria as architecturally infeasible" below for how that specific gap is actually handled. Also inherits the pre-existing risk that `agent.md` can go stale relative to the real code (a separate, still-unaddressed problem) — the orchestrator's plans are only as good as the last `haive index` run.
 
 ---
 
@@ -453,6 +467,56 @@ Format per entry:
 **Rationale:** Most task failures are recoverable — the orchestrator often has enough information from the failure `reason` to create a better-targeted follow-up task. Involving a human on every failure is disruptive and wastes the orchestrator's ability to self-correct. The lineage depth limit (`MAX_RECOVERY_DEPTH`, configurable via `.env`) is the hard backstop that prevents infinite recovery loops.
 
 **Tradeoff:** The orchestrator may spend tokens on recovery attempts that ultimately fail. This is acceptable — the cost of a few extra LLM calls is lower than the cost of interrupting a human for problems the system could resolve itself.
+
+---
+
+### Reviewer may request specific files beyond task scope (superseded — see "Shared read_file tool replaces the reviewer's JSON-shape request protocol")
+
+**Decision:** `ReviewAgent` can respond with `{"action": "request_file", "path": "..."}` instead of a verdict when it needs to verify a claim not covered by the code it was shown, up to a token budget shared across the whole review (reusing `_REVIEW_CONTEXT_BUDGET`, not a separate arbitrary request count). It stays on `ModelClient.call()` (plain text), not the agentic `call_single()`/tools protocol `CodeDiscoveryAgent` uses.
+
+**Alternatives:** Give the reviewer the full agentic tool-calling loop (`read_agent_md`/`list_subdirectories`) like `CodeDiscoveryAgent`; leave the reviewer scoped only to what discovery already found for the task (status quo before this).
+
+**Rationale:** The reviewer's context (`loaded_sections`) is scoped by the task's own description, not by what's needed to *verify* a claim about behavior elsewhere in the codebase — this caused a real failure where the reviewer couldn't confirm whether a callback ever receives certain data, because the file that would prove it was never in scope. A lightweight JSON request/response protocol avoids rewriting the reviewer's existing model-escalation tests (which mock `.call()` directly) and avoids introducing a second calling convention into the class.
+
+**Tradeoff:** The reviewer can only request files it can already name from something visible in front of it (an import, a call site) — it cannot browse the repo from scratch the way `CodeDiscoveryAgent` can. This fixes "confirm a lead I already have," not "find the answer when nothing in view points anywhere." If that proves insufficient, the next step is giving it the same navigation tools discovery uses — deliberately deferred to keep this change small.
+
+**Superseded:** The tradeoffs accepted above (avoid rewriting model-escalation tests, avoid a second calling convention) turned out to cost more than they saved. `TaskExecutor`'s code-editing call site needed the identical capability — a code editor explicitly said "I only have the run function in context... please provide the full contents" but had no schema-legitimate way to ask, since `min_length=1` (added separately to stop empty submissions) closed off the only escape valve. Building this twice, plus discovering a *third* independent hand-rolled version in `AgentMdGenerationAgent`, confirmed the "avoid a second calling convention" tradeoff was backwards — the JSON-shape convention *was* the second, less reliable one. See the new decision below for what replaced it.
+
+---
+
+### Shared read_file tool replaces the reviewer's JSON-shape request protocol
+
+**Decision:** `ReviewAgent` and `TaskExecutor` both use one shared `read_file` tool + tool-calling loop (`haive/execution/read_file_tool.py`), built on `ModelClient.call_single()`/real tool-calling — the same mechanism `CodeDiscoveryAgent` already used successfully. `ContextRequest` and the JSON-shape-sniffing it required are retired entirely.
+
+**Alternatives:** Generalize the existing JSON-shape convention into a shared helper both agents call, without switching to real tool-calling; give `TaskExecutor` its own separate ad-hoc mechanism rather than sharing one with the reviewer.
+
+**Rationale:** Real tool-calling removes an entire class of failure this session kept hitting — a model choosing the wrong JSON shape, or producing malformed output under an ambiguous convention (the same failure mode showed up as the empty-edit bug, the orchestrator JSON-extraction failures, and the reviewer's own request-parsing). The provider's own tool-calling API resolves "is this a tool call or a final answer?" unambiguously; no more guessing is needed. Sharing one implementation between both consumers (and designing it so `AgentMdGenerationAgent` could adopt it later) also removes duplicated path-safety and budget-truncation logic that had already been copied twice.
+
+**Tradeoff:** Both `ReviewAgent.review()` and `TaskExecutor._run_inner()` needed their core LLM-calling mechanism changed from a simple prompt/system string pair to a `messages` list threaded across retries/model-escalation — a larger, more invasive change than either individual fix would have been alone, and it required rewriting most of both files' existing tests. Accepted because doing it once, shared, is cheaper than the three-separate-implementations problem it replaces.
+
+---
+
+### Reviewer may flag acceptance criteria as architecturally infeasible
+
+**Decision:** `ReviewVerdict`/`ReviewAgentOutput` gain `infeasible: bool`, mutually exclusive with `passed`/`uncertain`. When set, `TaskExecutor` stops retrying immediately (no further tiers) instead of burning the rest of the tier ladder, and the orchestrator may create a recovery task on the next wave using the reviewer's stated reason — without waiting for a human comment first, unlike ordinary `needs_human_review` recovery. `lineage_depth < max_recovery_depth` still caps this exactly as it caps comment-gated recovery.
+
+**Alternatives:** Leave `infeasible` unrepresented and rely on `uncertain`/generic `passed=false` (status quo); require a human comment before any recovery, infeasible or not.
+
+**Rationale:** Confirmed live: a reviewer can correctly diagnose that a criterion is structurally impossible (not just poorly implemented) partway through the tier ladder, and the system had no way to act on that distinction — it kept escalating tiers and repeating doomed fixes. The reviewer's own reasoning, when specific, is as good a signal as a human restating the same thing in a comment.
+
+**Tradeoff:** Relies on the reviewer model restricting `infeasible=true` to genuine structural impossibilities rather than using it to dodge hard-but-solvable review calls — a prompt-following risk no schema validator can fully enforce. Also doesn't stop the *orchestrator* from writing an infeasible spec in the first place (see the repo map decision above) — it only stops the executor from wasting retries once that happens.
+
+---
+
+### Bounded autonomous run loop (`max_waves_per_run`)
+
+**Decision:** `haive run` loops automatically across waves (plan → execute → replan) within a single invocation, up to `Settings.max_waves_per_run` (default 2), instead of exiting after exactly one wave and requiring a human to re-invoke it. The orchestrator's two "nothing further to do" cases (empty output, recovery depth exceeded) now raise a dedicated `OrchestratorStalledError(RuntimeError)` instead of a plain `RuntimeError`, so the CLI can stop the loop cleanly and wait on a human rather than crashing.
+
+**Alternatives:** Keep single-wave-per-invocation (status quo, and what `architecture_overview.md`/`project_overview.md` described as the v1 non-goal — deliberately revised alongside this decision, not silently); gate autonomous looping behind an opt-in flag instead of making it the default.
+
+**Rationale:** Automatic recovery (repo map, infeasible-verdict recovery) only reduces human involvement if a human doesn't still have to manually re-run the command between every automatic recovery — otherwise the "automatic" part only saves retries within a task, not the operator's attention between waves. `max_waves_per_run` is a deliberately conservative cap "for now," not a permanent ceiling — meant to be raised once this proves reliable in practice.
+
+**Tradeoff:** Reclassifying those two `RuntimeError`s to `OrchestratorStalledError` changes `haive run`'s exit code for those specific cases from 1 to 0 — intentional (they're expected pause points, not bugs), but worth remembering if any external automation watches `haive run`'s exit code to decide success vs. failure, since it will now see "genuinely stalled, waiting on a human" as a clean exit (0) rather than a failure (1).
 
 ---
 

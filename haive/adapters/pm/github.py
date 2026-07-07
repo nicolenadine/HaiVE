@@ -26,6 +26,7 @@ _GH_STATUS_MAP: dict[str, TaskStatus] = {
     "in progress":        TaskStatus.IN_PROGRESS,
     "complete":           TaskStatus.COMPLETE,
     "needs_human_review": TaskStatus.NEEDS_HUMAN_REVIEW,
+    "awaiting_merge":     TaskStatus.AWAITING_MERGE,
     "blocked":            TaskStatus.BLOCKED,
     "skipped":            TaskStatus.SKIPPED,
 }
@@ -209,6 +210,7 @@ class GitHubPMAdapter:
                       number
                       title
                       body
+                      state
                       milestone { number }
                     }
                   }
@@ -254,18 +256,32 @@ class GitHubPMAdapter:
             project_branch=f"haive/project-{project_id}",
         )
 
-    def get_tasks(self, project_id: str) -> list[Task]:
-        milestone_number = int(project_id)
+    def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
+        """Project-board items belonging to this milestone, excluding closed issues.
+
+        Closing an issue and removing it from the Projects v2 board are separate
+        GitHub operations — a closed issue can still be attached to the board.
+        A closed issue is never an active task regardless of board membership.
+        """
         raw_items = self._fetch_project_items()
-        tasks: list[Task] = []
+        result: list[dict[str, Any]] = []
         for item in raw_items:
             content = item.get("content")
             if not content or "number" not in content:
                 continue
-            # Only include issues assigned to this milestone
+            if content.get("state") == "CLOSED":
+                continue
             item_milestone = content.get("milestone")
             if not item_milestone or item_milestone.get("number") != milestone_number:
                 continue
+            result.append(item)
+        return result
+
+    def get_tasks(self, project_id: str) -> list[Task]:
+        milestone_number = int(project_id)
+        tasks: list[Task] = []
+        for item in self._project_items_for_milestone(milestone_number):
+            content = item["content"]
             fields = self._extract_field_values(item.get("fieldValues", {}).get("nodes", []))
             milestone = content.get("milestone")
             gh_issue = _GitHubIssue(
@@ -287,16 +303,9 @@ class GitHubPMAdapter:
 
     def read_new_comments(self, project_id: str, since: datetime) -> list[TaskComment]:
         milestone_number = int(project_id)
-        raw_items = self._fetch_project_items()
         comments: list[TaskComment] = []
-        for item in raw_items:
-            content = item.get("content")
-            if not content or "number" not in content:
-                continue
-            item_milestone = content.get("milestone")
-            if not item_milestone or item_milestone.get("number") != milestone_number:
-                continue
-            issue_number = content["number"]
+        for item in self._project_items_for_milestone(milestone_number):
+            issue_number = item["content"]["number"]
             gh_issue = self._repo_obj.get_issue(issue_number)
             for comment in gh_issue.get_comments(since=since):
                 comments.append(TaskComment(
@@ -348,7 +357,7 @@ class GitHubPMAdapter:
             "value": value,
         })
 
-    def create_task(self, project_id: str, task: Any) -> str:
+    def create_task(self, project_id: str, task: Any) -> Task:
         milestone_obj = self._repo_obj.get_milestone(int(project_id))
         gh_issue = self._repo_obj.create_issue(
             title=task.title,
@@ -380,7 +389,20 @@ class GitHubPMAdapter:
         self._update_field(item_id, "haive_acceptance_criteria", {
             "text": "\n".join(task.acceptance_criteria),
         })
-        return str(gh_issue.number)
+        return self._map_issue_to_task(_GitHubIssue(
+            issue_node_id=content_node_id,
+            issue_number=gh_issue.number,
+            title=task.title,
+            body=task.description,
+            gh_status="pending",
+            haive_depends_on="",
+            milestone_id=int(project_id),
+            haive_agent_role=task.agent_role.value,
+            haive_complexity=task.complexity.value,
+            haive_lineage_depth=task.lineage_depth,
+            haive_recovery_for=task.recovery_for,
+            haive_acceptance_criteria="\n".join(task.acceptance_criteria),
+        ))
 
     def set_dependency(self, task_id: str, depends_on: list[str]) -> None:
         item_id = self._get_project_item_id(task_id)

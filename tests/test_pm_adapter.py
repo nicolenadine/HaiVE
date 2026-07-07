@@ -99,6 +99,7 @@ def _issue_node(
     acceptance_criteria: str = "Works\nTests pass",
     depends_on: str = "",                       # comma-separated issue numbers
     milestone_number: int | None = 7,           # default matches get_tasks("7")
+    state: str = "OPEN",
 ) -> dict:
     return {
         "content": {
@@ -106,6 +107,7 @@ def _issue_node(
             "number": number,
             "title": title,
             "body": body,
+            "state": state,
             "milestone": {"number": milestone_number} if milestone_number is not None else None,
         },
         "fieldValues": {
@@ -245,6 +247,21 @@ class TestGetTasks:
         tasks = adapter.get_tasks("7")
         assert tasks == []
 
+    def test_excludes_closed_issues_even_if_still_on_board(self):
+        # Closing an issue and removing it from the Projects v2 board are
+        # separate GitHub operations — a closed issue can still be attached
+        # to the board, and must never be treated as an active task.
+        adapter = _make_adapter()
+        adapter._graphql.side_effect = [
+            _items_page([
+                _issue_node(number=10, issue_id="I_10", state="CLOSED"),
+                _issue_node(number=20, issue_id="I_20", state="OPEN"),
+            ]),
+        ]
+        tasks = adapter.get_tasks("7")
+        assert len(tasks) == 1
+        assert tasks[0].task_id == "20"
+
 
 # ---------------------------------------------------------------------------
 # TestReadNewComments
@@ -315,6 +332,20 @@ class TestReadNewComments:
 
         assert len(comments) == 1
         assert comments[0].task_id == "10"
+
+    def test_excludes_comments_from_closed_issues(self):
+        adapter = _make_adapter()
+        adapter._graphql.side_effect = [
+            _items_page([
+                _issue_node(number=10, issue_id="I_10", state="OPEN"),
+                _issue_node(number=20, issue_id="I_20", state="CLOSED"),
+            ])
+        ]
+        adapter._repo_obj.get_issue.return_value.get_comments.return_value = []
+
+        adapter.read_new_comments("7", self._since)
+
+        adapter._repo_obj.get_issue.assert_called_once_with(10)
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ class FileToCreate(BaseModel):
 class ScaffoldAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    files: list[FileToCreate] = Field(description="Files to create.")
+    files: list[FileToCreate] = Field(min_length=1, description="Files to create.")
     notes: str = Field(default="", description="Optional notes for the reviewer.")
 
 
@@ -31,7 +31,7 @@ class FileEdit(BaseModel):
 class CodeEditorOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edits: list[FileEdit] = Field(description="Files to write or overwrite.")
+    edits: list[FileEdit] = Field(min_length=1, description="Files to write or overwrite.")
     notes: str = Field(default="", description="Optional notes for the reviewer.")
 
 
@@ -55,6 +55,14 @@ class ReviewAgentOutput(BaseModel):
         default=False,
         description="True when the reviewer cannot determine correctness. Mutually exclusive with passed=True.",
     )
+    infeasible: bool = Field(
+        default=False,
+        description=(
+            "True when the acceptance criteria are architecturally unsatisfiable given the "
+            "real code — not an implementation mistake. Mutually exclusive with passed=True "
+            "and uncertain=True."
+        ),
+    )
     findings: list[ReviewFinding] = Field(
         default_factory=list,
         description="Issues found. Empty when passed=True.",
@@ -65,6 +73,10 @@ class ReviewAgentOutput(BaseModel):
     def uncertain_and_passed_are_exclusive(self) -> "ReviewAgentOutput":
         if self.uncertain and self.passed:
             raise ValueError("uncertain=True and passed=True are mutually exclusive.")
+        if self.infeasible and self.passed:
+            raise ValueError("infeasible=True and passed=True are mutually exclusive.")
+        if self.infeasible and self.uncertain:
+            raise ValueError("infeasible=True and uncertain=True are mutually exclusive.")
         return self
 
 
@@ -73,7 +85,7 @@ class ReviewAgentOutput(BaseModel):
 class TestGeneratorOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edits: list[FileEdit] = Field(description="Test files to write or overwrite.")
+    edits: list[FileEdit] = Field(min_length=1, description="Test files to write or overwrite.")
     notes: str = Field(default="", description="Optional notes about test coverage.")
 
 
@@ -82,7 +94,7 @@ class TestGeneratorOutput(BaseModel):
 class DocumentationWriterOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edits: list[FileEdit] = Field(description="Documentation files to write or overwrite.")
+    edits: list[FileEdit] = Field(min_length=1, description="Documentation files to write or overwrite.")
     notes: str = Field(default="", description="Optional notes for the reviewer.")
 
 

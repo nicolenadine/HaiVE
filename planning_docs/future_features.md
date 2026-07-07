@@ -65,6 +65,63 @@ agent prompts (`prompts/`), and the file-writing logic in the Task Executor.
 
 ---
 
+## Reviewer & Orchestrator Context Awareness
+
+### Full repo navigation for the Reviewer Agent
+`ReviewAgent` can currently only request a file it can already name from something visible
+in front of it (an import statement, a call site) — it cannot browse the repo from scratch.
+If reviews keep missing gaps because the relevant file was never referenced anywhere in view,
+give it the same `read_agent_md`/`list_subdirectories` navigation tools `CodeDiscoveryAgent`
+uses, so it can search rather than only confirm a lead it already has. Deferred to keep the
+initial on-demand file-read change small; revisit after seeing whether path-only requests move
+the needle in practice.
+
+### Raise `max_waves_per_run` once autonomous recovery proves reliable
+`haive run` currently caps automatic wave looping at 2 per invocation — deliberately
+conservative while the infeasible-verdict auto-recovery and orchestrator repo-map changes are
+new and unproven. Raise this once a track record of correct automatic recoveries builds up
+confidence that a stalled or misbehaving loop won't silently burn many waves of tokens.
+
+### Symbol line-range correction for non-Python languages
+`haive/discovery/symbol_line_corrector.py` (see `build_plan.md`'s H1) only corrects
+Python files, using the stdlib `ast` module for exact, no-guessing line ranges. Other
+languages `SOURCE_EXTENSIONS` supports (JS/TS, Go, Java, Ruby, Rust, C/C++, C#, Swift)
+still rely on the LLM's estimate, same as before this fix — not worse, just not improved.
+Extending this would need either a per-language parser (tree-sitter — a new dependency,
+and one that would need real non-Python source in this repo to validate against) or a
+simpler regex-plus-brace-depth-counting heuristic per language. Deferred until haive is
+actually run against a non-Python project, so the approach can be validated against real
+code rather than built speculatively.
+
+### Per-task git worktree isolation
+Task #16 revealed that `create_branch()` only creates a branch on GitHub via API, never a
+local one — so `push_commits()`'s git commands ran against whatever was checked out at
+process start, sweeping in unrelated uncommitted files. Fixed for the common case: `create_branch`
+now does a local `git checkout -B`, and `checkout_branch()` returns to `project_branch` (+ pulls)
+once a task's PR is handled. But checking out a branch is repo-wide on one shared working
+directory — with `MAX_EXECUTORS = 2` (task_scheduler.py), two tasks can genuinely run
+concurrently in separate threads and race on which branch is checked out, or interleave file
+writes. Full safety under real concurrency needs each task to execute in its own `git worktree`
+(a separate real directory checked out to its own branch, so concurrent tasks can't collide no
+matter how many run at once) — bigger change, touching `TaskExecutor`/`VCSAdapter`/worktree
+lifecycle and cleanup. Deferred; the current fix is correct for sequential/single-task execution,
+which is what's been exercised so far.
+
+---
+
+## Migrate AgentMdGenerationAgent onto the shared read_file tool
+
+`ReviewAgent` and `TaskExecutor` both now use `haive/execution/read_file_tool.py`'s shared
+`read_file` tool + `run_tool_loop`, replacing two previously-separate hand-rolled mechanisms.
+While building that, a third, independent implementation was found in
+`haive/discovery/agent_md_generation_agent.py` (`AgentMdGenerationAgent`) — its own duplicated
+`read_file` tool schema, its own copy of `resolve_within_root`, and its own copy of
+`_assistant_message`. Migrating it onto the shared module would remove the last duplicate, but
+its exit semantics differ (it returns generated markdown text, not a verdict/edit), so it wasn't
+in scope here. Revisit once there's a concrete reason to touch that agent again.
+
+---
+
 ## GitHub Native Issue Relationships
 
 `haive_depends_on` is currently a text custom field (comma-separated issue numbers) because

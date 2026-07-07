@@ -806,23 +806,32 @@ Each step in this plan represents one milestone of work: focused, independently 
 
 Known reliability gaps to address before or during Phase 11 integration testing.
 
-### H1 — agent.md symbol line number correction
+### H1 — agent.md symbol line number correction (RESOLVED)
 
 **Problem:** `AgentMdGenerationAgent` asks the LLM to count line numbers, but LLMs
 estimate rather than parse. On files longer than ~200 lines, the assigned `start-end`
 range for later symbols can be off by 50–150 lines. Observed: `run` in `haive/cli.py`
-assigned range 234–301 when it actually starts at line 347.
+assigned range 234–301 when it actually starts at line 347 (later recurred as
+299–470 vs. an actual end well past 470, causing repeated task-executor failures
+in a live dogfood run).
 
 **Impact:** `FileIndexService.load_sections()` cuts the wrong slice, loading an
 unrelated function rather than the intended one.
 
-**Fix:** After `AgentMdGenerationAgent.generate()` (and `.update()`) writes each
-agent.md, parse the symbol entries, open the corresponding source file, and verify
-each symbol's start line by searching for the function/class definition. Correct any
-line that is off. This is a deterministic post-processing pass — no extra LLM call.
+**Fix implemented:** `haive/discovery/symbol_line_corrector.py`'s `correct_line_ranges()`
+parses each referenced Python file's real `ast` (class/function/method definitions,
+with exact `lineno`/`end_lineno` — no estimation, since it's the same parser that
+runs the code) and overwrites the LLM's guessed range with the real one, matching by
+symbol name and disambiguating duplicate names (e.g. `__init__` in multiple classes)
+by picking the candidate closest to the LLM's original guess. Entries for non-Python
+files, non-correctable kinds (`constant`), or names that don't match anything in the
+real source are left unchanged rather than guessed at. Wired into both
+`FileIndexService._generate_for_dir()` and `_update_for_dir()`, after content passes
+`AgentMdValidator` and before writing to disk. Tests: `tests/test_symbol_line_corrector.py`.
 
-**Scope:** `FileIndexService._generate_for_dir()` and `_update_for_dir()` — after
-content passes `AgentMdValidator`, run a symbol line corrector before writing to disk.
+**Follow-up:** only corrects Python (`ast` is stdlib and exact); other languages in
+`SOURCE_EXTENSIONS` (JS/TS, Go, Java, Ruby, Rust, C/C++, C#, Swift) still rely on the
+LLM's estimate, same as before this fix — see `future_features.md`.
 
 ---
 

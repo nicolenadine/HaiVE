@@ -86,6 +86,27 @@ class TestSchemaVersionMismatch:
         assert restored.schema_version == "1"
 
 
+class TestAttemptLogEntryReasonTruncation:
+    def test_short_reason_is_unchanged(self):
+        entry = AttemptLogEntry(tier=Complexity.MEDIUM, attempt=1, reason="short reason")
+        assert entry.reason == "short reason"
+
+    def test_long_reason_is_truncated(self):
+        entry = AttemptLogEntry(tier=Complexity.MEDIUM, attempt=1, reason="x" * 1000)
+        assert len(entry.reason) < 1000
+        assert entry.reason.endswith("[truncated]")
+
+    def test_truncation_boundary_is_exact(self):
+        from haive.models.task import _MAX_ATTEMPT_LOG_REASON_CHARS
+        entry = AttemptLogEntry(tier=Complexity.MEDIUM, attempt=1, reason="x" * _MAX_ATTEMPT_LOG_REASON_CHARS)
+        assert entry.reason == "x" * _MAX_ATTEMPT_LOG_REASON_CHARS  # exactly at the limit, untouched
+
+        entry_over = AttemptLogEntry(
+            tier=Complexity.MEDIUM, attempt=1, reason="x" * (_MAX_ATTEMPT_LOG_REASON_CHARS + 1)
+        )
+        assert entry_over.reason != "x" * (_MAX_ATTEMPT_LOG_REASON_CHARS + 1)
+
+
 class TestSchemaConstraints:
     def test_attempt_log_entry_has_no_suggestions_field(self):
         fields = AttemptLogEntry.model_fields

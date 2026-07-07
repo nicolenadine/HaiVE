@@ -10,15 +10,22 @@ class ReviewVerdict(BaseModel):
     reason: str
     suggestions: list[str] = Field(default_factory=list)
     uncertain: bool = False
+    infeasible: bool = False
 
     @model_validator(mode="after")
     def validate_consistency(self) -> "ReviewVerdict":
         if self.uncertain and self.passed:
             raise ValueError("uncertain=True and passed=True are mutually exclusive.")
-        if not self.passed and not self.uncertain and not self.suggestions:
-            raise ValueError("suggestions must be non-empty when passed=False and uncertain=False.")
+        if self.infeasible and self.passed:
+            raise ValueError("infeasible=True and passed=True are mutually exclusive.")
+        if self.infeasible and self.uncertain:
+            raise ValueError("infeasible=True and uncertain=True are mutually exclusive.")
+        if not self.passed and not self.uncertain and not self.infeasible and not self.suggestions:
+            raise ValueError(
+                "suggestions must be non-empty when passed=False, uncertain=False, and infeasible=False."
+            )
         return self
 
     def to_summary(self) -> VerdictSummary:
         """Derive a stored VerdictSummary, dropping suggestions and uncertain."""
-        return VerdictSummary(passed=self.passed, reason=self.reason)
+        return VerdictSummary(passed=self.passed, reason=self.reason, infeasible=self.infeasible)

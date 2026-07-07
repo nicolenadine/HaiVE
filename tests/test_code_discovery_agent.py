@@ -25,12 +25,16 @@ from haive.models.task import Task
 _TIER = Tier(models=["test-model"], max_attempts=1, context_budget=8000)
 
 
-def _make_task(title: str = "Add task validation", description: str = "Validate task input.") -> Task:
+def _make_task(
+    title: str = "Add task validation",
+    description: str = "Validate task input.",
+    agent_role: AgentRole = AgentRole.IMPLEMENTATION_AGENT,
+) -> Task:
     return Task(
         task_id="1",
         title=title,
         description=description,
-        agent_role=AgentRole.IMPLEMENTATION_AGENT,
+        agent_role=agent_role,
         complexity=Complexity.MEDIUM,
         depends_on=[],
         acceptance_criteria=["ac"],
@@ -148,7 +152,9 @@ class TestTargetedDiscovery:
 
         assert result.status == "found"
 
-    def test_symbol_level_section_is_accepted(self, agent, mock_client, repo_root):
+    def test_symbol_level_section_is_accepted_for_scaffold_tasks(self, agent, mock_client, repo_root):
+        # Scaffold tasks create brand-new files, so there's no existing content
+        # to lose — they're exempt from the full-file override below.
         section = {
             "file": "models/task.py",
             "symbol": "Task",
@@ -162,12 +168,67 @@ class TestTargetedDiscovery:
             _turn_with_content(json.dumps({"sections": [section], "status": "found"})),
         ]
 
-        result = agent.discover(_make_task(), repo_root, token_budget=4000)
+        result = agent.discover(
+            _make_task(agent_role=AgentRole.SCAFFOLD_AGENT), repo_root, token_budget=4000
+        )
 
         assert result.sections[0].symbol == "Task"
         assert result.sections[0].start_line == 15
         assert result.sections[0].end_line == 25
         assert result.sections[0].full is False
+
+    def test_non_scaffold_tasks_always_get_full_file_sections(self, agent, mock_client, repo_root):
+        # A code-editing submission always replaces a file's entire content,
+        # so a partial symbol range can never safely become that replacement —
+        # non-scaffold tasks are forced to full=True regardless of what the
+        # discovery agent itself proposed.
+        section = {
+            "file": "models/task.py",
+            "symbol": "Task",
+            "start_line": 15,
+            "end_line": 25,
+            "full": False,
+            "reason": "Task class defines the domain model.",
+        }
+        mock_client.call_single.side_effect = [
+            _turn_with_tools(_tool_call("read_agent_md", directory=".")),
+            _turn_with_content(json.dumps({"sections": [section], "status": "found"})),
+        ]
+
+        result = agent.discover(
+            _make_task(agent_role=AgentRole.IMPLEMENTATION_AGENT), repo_root, token_budget=4000
+        )
+
+        assert result.sections[0].full is True
+        assert result.sections[0].start_line is None
+        assert result.sections[0].end_line is None
+        assert result.sections[0].symbol is None
+
+    def test_non_scaffold_tasks_deduplicate_multiple_sections_of_same_file(
+        self, agent, mock_client, repo_root
+    ):
+        sections = [
+            {
+                "file": "models/task.py", "symbol": "Task", "start_line": 15,
+                "end_line": 25, "full": False, "reason": "First relevant symbol.",
+            },
+            {
+                "file": "models/task.py", "symbol": "TaskComment", "start_line": 30,
+                "end_line": 40, "full": False, "reason": "Second relevant symbol, same file.",
+            },
+        ]
+        mock_client.call_single.side_effect = [
+            _turn_with_tools(_tool_call("read_agent_md", directory=".")),
+            _turn_with_content(json.dumps({"sections": sections, "status": "found"})),
+        ]
+
+        result = agent.discover(
+            _make_task(agent_role=AgentRole.IMPLEMENTATION_AGENT), repo_root, token_budget=4000
+        )
+
+        assert len(result.sections) == 1
+        assert result.sections[0].file == "models/task.py"
+        assert result.sections[0].full is True
 
 
 # ---------------------------------------------------------------------------

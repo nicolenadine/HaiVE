@@ -28,7 +28,7 @@ from haive.models.task import (
     TaskExecutionRecord,
     VerdictSummary,
 )
-from haive.orchestration.orchestrator import Orchestrator
+from haive.orchestration.orchestrator import Orchestrator, OrchestratorStalledError
 from haive.orchestration.task_view_builder import TaskViewBuilder
 
 
@@ -107,12 +107,14 @@ def _make_new_task(
 def _make_input(
     tasks: list[OrchestratorTaskView] | None = None,
     comments: list[TaskComment] | None = None,
+    repo_map: str = "",
 ) -> OrchestratorInput:
     return OrchestratorInput(
         project=_PROJECT,
         tasks=tasks or [],
         new_comments=comments or [],
         agent_summary="implementation_agent: writes code",
+        repo_map=repo_map,
     )
 
 
@@ -271,6 +273,14 @@ class TestOrchestratorRunLoop:
         with pytest.raises(RuntimeError, match="max_recovery_depth"):
             orch.run_loop(_make_input(tasks=tasks))
 
+    def test_recovery_at_max_depth_raises_orchestrator_stalled_error(self):
+        bad_recovery = _make_new_task(recovery_for="42", lineage_depth=4)
+        client = _mock_client(_output_json(new_tasks=[bad_recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("42", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=3)]
+        with pytest.raises(OrchestratorStalledError):
+            orch.run_loop(_make_input(tasks=tasks))
+
     def test_done_true_signals_completion(self):
         client = _mock_client(_output_json(done=True))
         orch = _make_orchestrator(client)
@@ -282,6 +292,12 @@ class TestOrchestratorRunLoop:
         client = _mock_client(_output_json(new_tasks=[], done=False))
         orch = _make_orchestrator(client)
         with pytest.raises(RuntimeError, match="empty new_tasks"):
+            orch.run_loop(_make_input())
+
+    def test_empty_tasks_done_false_raises_orchestrator_stalled_error(self):
+        client = _mock_client(_output_json(new_tasks=[], done=False))
+        orch = _make_orchestrator(client)
+        with pytest.raises(OrchestratorStalledError):
             orch.run_loop(_make_input())
 
     def test_new_comments_in_input(self):
@@ -303,6 +319,37 @@ class TestOrchestratorRunLoop:
         orch = _make_orchestrator(client)
         result = orch.run_loop(_make_input())
         assert len(result.new_tasks) == 1
+
+    def test_repo_map_is_included_in_prompt(self):
+        client = _mock_client(_output_json(new_tasks=[_make_new_task()]))
+        orch = _make_orchestrator(client)
+        orch.run_loop(_make_input(repo_map="### ./\n\ncli.py — command-line interface"))
+        prompt = client.call.call_args.args[1]
+        assert "cli.py" in prompt
+        assert "command-line interface" in prompt
+
+    def test_infeasible_verdict_is_visible_in_prompt_without_a_comment(self):
+        # Recovery eligibility for an infeasible verdict is prompt-driven, not code-enforced —
+        # this only confirms the signal the orchestrator needs actually reaches the prompt,
+        # with no new_comments required.
+        client = _mock_client(_output_json(new_tasks=[_make_new_task(recovery_for="42")]))
+        orch = _make_orchestrator(client)
+        tasks = [
+            _make_view(
+                "42",
+                TaskStatus.NEEDS_HUMAN_REVIEW,
+                lineage_depth=1,
+                verdict=VerdictSummary(
+                    passed=False,
+                    reason="on_task_complete never receives blocked-status records.",
+                    infeasible=True,
+                ),
+            )
+        ]
+        orch.run_loop(_make_input(tasks=tasks, comments=[]))
+        prompt = client.call.call_args.args[1]
+        assert '"infeasible": true' in prompt
+        assert "on_task_complete never receives blocked-status records." in prompt
 
     def test_api_error_propagates(self):
         client = MagicMock(spec=ModelClient)

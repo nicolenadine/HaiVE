@@ -14,6 +14,7 @@ from haive.cli import app
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.orchestrator import NewTask, OrchestratorOutput
 from haive.models.task import Project, Task, TaskExecutionRecord, VerdictSummary
+from haive.orchestration.orchestrator import OrchestratorStalledError
 
 runner = CliRunner()
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -55,12 +56,15 @@ def _base_mocks() -> dict:
     mock_settings = MagicMock()
     mock_settings.max_recovery_depth = 3
     mock_settings.dry_run = False
+    # Single-wave by default so existing single-wave-focused tests are unaffected by
+    # the run loop; multi-wave behavior is tested explicitly with its own settings.
+    mock_settings.max_waves_per_run = 1
 
     mock_pm = MagicMock()
     mock_pm.get_project.return_value = make_project()
     mock_pm.get_tasks.return_value = []
     mock_pm.read_new_comments.return_value = []
-    mock_pm.create_task.return_value = "101"
+    mock_pm.create_task.return_value = make_task(task_id="101", title="New feature")
 
     mock_vcs = MagicMock()
     mock_vcs.create_project_pr.return_value = "https://github.com/owner/repo/pull/1"
@@ -87,11 +91,16 @@ def _base_mocks() -> dict:
 
     mock_scheduler = MagicMock()
 
+    mock_file_index = MagicMock()
+    mock_file_index.read_repo_map.return_value = ""
+    mock_file_index.resync_line_ranges.return_value = []
+
     return dict(
         settings=mock_settings, pm=mock_pm, vcs=mock_vcs,
         state=mock_state, state_store=mock_state_store,
         orchestrator=mock_orchestrator, registry=mock_registry,
         tier_config=mock_tier_config, scheduler=mock_scheduler,
+        file_index=mock_file_index,
     )
 
 
@@ -119,7 +128,7 @@ def _run_with_mocks(
         tc_cls = stack.enter_context(patch("haive.llm.tier_config.TierConfig"))
         stack.enter_context(patch("haive.llm.model_client.ModelClient"))
         stack.enter_context(patch("haive.discovery.code_discovery_agent.CodeDiscoveryAgent"))
-        stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService"))
+        stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService", return_value=m["file_index"]))
         stack.enter_context(patch("haive.orchestration.orchestrator.Orchestrator", return_value=m["orchestrator"]))
         stack.enter_context(patch("haive.orchestration.task_scheduler.TaskScheduler", return_value=m["scheduler"]))
         stack.enter_context(patch("haive.execution.review_agent.ReviewAgent"))
@@ -154,6 +163,31 @@ class TestRunPreflightAgentMd:
         m = _base_mocks()
         result = _run_with_mocks(m, agent_md_exists=True)
         assert result.exit_code == 0
+
+
+class TestRunLineRangeResync:
+    def test_resync_called_with_root_before_wave_loop(self):
+        m = _base_mocks()
+        _run_with_mocks(m, root="/fake/root")
+        m["file_index"].resync_line_ranges.assert_called_once_with("/fake/root")
+
+    def test_skipped_in_dry_run(self):
+        m = _base_mocks()
+        result = _run_with_mocks(m, extra_args=["--dry-run"])
+        assert result.exit_code == 0
+        m["file_index"].resync_line_ranges.assert_not_called()
+
+    def test_prints_message_when_files_corrected(self):
+        m = _base_mocks()
+        m["file_index"].resync_line_ranges.return_value = ["haive/agent.md"]
+        result = _run_with_mocks(m)
+        assert "Corrected stale line ranges" in result.output
+        assert "haive/agent.md" in result.output
+
+    def test_no_message_when_nothing_corrected(self):
+        m = _base_mocks()
+        result = _run_with_mocks(m)
+        assert "Corrected stale line ranges" not in result.output
 
 
 class TestRunDryRun:
@@ -202,7 +236,10 @@ class TestRunTaskCreation:
             done=False,
             new_tasks=[make_new_task(title="A"), make_new_task(title="B")],
         )
-        m["pm"].create_task.side_effect = ["101", "102"]
+        m["pm"].create_task.side_effect = [
+            make_task(task_id="101", title="A"),
+            make_task(task_id="102", title="B"),
+        ]
         _run_with_mocks(m)
         assert m["pm"].create_task.call_count == 2
 
@@ -215,7 +252,10 @@ class TestRunTaskCreation:
                 make_new_task(title="B", depends_on=["new:0"]),
             ],
         )
-        m["pm"].create_task.side_effect = ["101", "102"]
+        m["pm"].create_task.side_effect = [
+            make_task(task_id="101", title="A"),
+            make_task(task_id="102", title="B"),
+        ]
         _run_with_mocks(m)
         # "new:0" must be resolved to the real ID "101" before calling set_dependency
         m["pm"].set_dependency.assert_called_once_with("102", ["101"])
@@ -236,7 +276,7 @@ class TestRunWaveSummary:
         m["pm"].get_tasks.return_value = [make_task(status=TaskStatus.COMPLETE)]
         result = _run_with_mocks(m)
         assert result.exit_code == 0
-        assert "Wave complete" in result.output
+        assert "Wave 1 complete" in result.output
 
     def test_scheduler_receives_on_complete_callback(self):
         m = _base_mocks()
@@ -246,3 +286,149 @@ class TestRunWaveSummary:
         # on_complete is the 4th positional or keyword arg
         _, kwargs = call_kwargs
         assert "on_complete" in kwargs and kwargs["on_complete"] is not None
+
+    def test_blocked_tasks_get_a_per_task_yellow_line(self):
+        m = _base_mocks()
+        m["pm"].get_tasks.return_value = [make_task(task_id="7", status=TaskStatus.BLOCKED)]
+        result = _run_with_mocks(m)
+        assert result.exit_code == 0
+        assert "Task #7 — blocked" in result.output
+        assert "1 blocked" in result.output
+
+
+class TestRunAutonomousWaveLoop:
+    def test_second_wave_runs_automatically_until_done(self):
+        m = _base_mocks()
+        m["settings"].max_waves_per_run = 2
+        m["orchestrator"].run_loop.side_effect = [
+            OrchestratorOutput(done=False, new_tasks=[make_new_task(title="A")]),
+            OrchestratorOutput(done=True, new_tasks=[]),
+        ]
+        result = _run_with_mocks(m)
+        assert result.exit_code == 0
+        assert m["orchestrator"].run_loop.call_count == 2
+        assert m["scheduler"].start.call_count == 1
+        m["vcs"].create_project_pr.assert_called_once()
+
+    def test_stops_at_wave_cap_without_error(self):
+        m = _base_mocks()
+        m["settings"].max_waves_per_run = 2
+        # Default orchestrator mock always returns done=False with a new task.
+        result = _run_with_mocks(m)
+        assert result.exit_code == 0
+        assert m["orchestrator"].run_loop.call_count == 2
+        assert "automatic wave limit" in result.output.lower()
+
+    def test_orchestrator_stalled_error_stops_gracefully(self):
+        m = _base_mocks()
+        m["settings"].max_waves_per_run = 2
+        m["orchestrator"].run_loop.side_effect = OrchestratorStalledError(
+            "Orchestrator returned empty new_tasks without signaling done."
+        )
+        result = _run_with_mocks(m, catch_exceptions=True)
+        assert result.exit_code == 0
+        assert "waiting on human input" in result.output
+        assert m["orchestrator"].run_loop.call_count == 1
+        m["scheduler"].start.assert_not_called()
+
+
+class TestReconciliation:
+    def test_marks_merged_pr_as_complete_and_refreshes_tasks(self):
+        m = _base_mocks()
+        awaiting_task = make_task(task_id="5", status=TaskStatus.AWAITING_MERGE)
+        # 1st call: initial wave fetch. 2nd: post-reconciliation refresh. 3rd: final wave-end fetch.
+        m["pm"].get_tasks.side_effect = [[awaiting_task], [], []]
+        m["state"].tasks = {"5": TaskExecutionRecord(task_id="5", pr_id="9")}
+        m["vcs"].is_pr_merged.return_value = True
+
+        _run_with_mocks(m)
+
+        m["vcs"].is_pr_merged.assert_called_once_with("9")
+        m["pm"].update_status.assert_any_call("5", TaskStatus.COMPLETE)
+        assert m["pm"].get_tasks.call_count == 3
+
+    def test_leaves_unmerged_pr_untouched(self):
+        m = _base_mocks()
+        awaiting_task = make_task(task_id="5", status=TaskStatus.AWAITING_MERGE)
+        m["pm"].get_tasks.return_value = [awaiting_task]
+        m["state"].tasks = {"5": TaskExecutionRecord(task_id="5", pr_id="9")}
+        m["vcs"].is_pr_merged.return_value = False
+
+        _run_with_mocks(m)
+
+        m["vcs"].is_pr_merged.assert_called_once_with("9")
+        complete_calls = [
+            c for c in m["pm"].update_status.call_args_list
+            if c.args == ("5", TaskStatus.COMPLETE)
+        ]
+        assert complete_calls == []
+
+    def test_skips_tasks_without_stored_pr_id(self):
+        m = _base_mocks()
+        awaiting_task = make_task(task_id="5", status=TaskStatus.AWAITING_MERGE)
+        m["pm"].get_tasks.return_value = [awaiting_task]
+        m["state"].tasks = {}
+
+        _run_with_mocks(m)
+
+        m["vcs"].is_pr_merged.assert_not_called()
+
+
+class TestPruneBranches:
+    def _run_prune(self, m: dict, extra_args: list[str] | None = None) -> object:
+        args = ["prune-branches"] + (extra_args or [])
+        with ExitStack() as stack:
+            stack.enter_context(patch("haive.cli._check_git_on_path"))
+            stack.enter_context(patch("haive.cli._check_active_config"))
+            stack.enter_context(patch("haive.models.config.load_settings", return_value=m["settings"]))
+            stack.enter_context(patch("haive.adapters.vcs.github.GitHubVCSAdapter", return_value=m["vcs"]))
+            return runner.invoke(app, args)
+
+    def test_lists_and_deletes_merged_branches_on_confirmation(self):
+        m = _base_mocks()
+        m["vcs"].list_task_branches.return_value = ["haive/task-1", "haive/task-2"]
+        m["vcs"].find_pr_for_branch.side_effect = [("10", True), ("11", True)]
+
+        result = self._run_prune(m, extra_args=["--yes"])
+
+        assert result.exit_code == 0
+        assert m["vcs"].delete_branch.call_count == 2
+        m["vcs"].delete_branch.assert_any_call("haive/task-1")
+        m["vcs"].delete_branch.assert_any_call("haive/task-2")
+
+    def test_closed_unmerged_branches_only_listed_not_deleted(self):
+        m = _base_mocks()
+        m["vcs"].list_task_branches.return_value = ["haive/task-1"]
+        m["vcs"].find_pr_for_branch.return_value = ("10", False)
+
+        result = self._run_prune(m, extra_args=["--yes"])
+
+        assert result.exit_code == 0
+        assert "closed without merging" in result.output.lower()
+        m["vcs"].delete_branch.assert_not_called()
+
+    def test_no_merged_branches_reports_nothing_to_prune(self):
+        m = _base_mocks()
+        m["vcs"].list_task_branches.return_value = []
+
+        result = self._run_prune(m, extra_args=["--yes"])
+
+        assert result.exit_code == 0
+        assert "no merged task branches" in result.output.lower()
+        m["vcs"].delete_branch.assert_not_called()
+
+    def test_declining_confirmation_deletes_nothing(self):
+        m = _base_mocks()
+        m["vcs"].list_task_branches.return_value = ["haive/task-1"]
+        m["vcs"].find_pr_for_branch.return_value = ("10", True)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("haive.cli._check_git_on_path"))
+            stack.enter_context(patch("haive.cli._check_active_config"))
+            stack.enter_context(patch("haive.models.config.load_settings", return_value=m["settings"]))
+            stack.enter_context(patch("haive.adapters.vcs.github.GitHubVCSAdapter", return_value=m["vcs"]))
+            result = runner.invoke(app, ["prune-branches"], input="n\n")
+
+        assert result.exit_code == 0
+        assert "aborted" in result.output.lower()
+        m["vcs"].delete_branch.assert_not_called()

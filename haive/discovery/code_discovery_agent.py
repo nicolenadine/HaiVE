@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 from pydantic import ValidationError
 
 from haive.discovery.code_discovery_prompt import CODE_DISCOVERY_SYSTEM_PROMPT
 from haive.discovery.constants import CODE_DISCOVERY_MAX_TOKENS, CODE_DISCOVERY_MAX_TOOL_CALLS
+from haive.discovery.path_safety import resolve_within_root
 from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
 from haive.models.discovery import DiscoveredSection, DiscoveryResult
+from haive.models.enums import AgentRole
 from haive.models.task import Task
 
 _TOOLS: list[dict] = [
@@ -105,7 +106,7 @@ class CodeDiscoveryAgent:
             messages.append(self._assistant_message(turn))
 
             if not turn.tool_calls:
-                return self._parse_result(turn.content or "")
+                return self._finalize(self._parse_result(turn.content or ""), task)
 
             for tc in turn.tool_calls:
                 result = self._execute_tool(tc.name, tc.arguments, root)
@@ -126,9 +127,36 @@ class CodeDiscoveryAgent:
             messages=messages,
             max_tokens=CODE_DISCOVERY_MAX_TOKENS,
         )
-        return self._parse_result(final.content or "")
+        return self._finalize(self._parse_result(final.content or ""), task)
 
     # ── internal helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _finalize(result: DiscoveryResult, task: Task) -> DiscoveryResult:
+        """Force full-file loading for every section on non-scaffold tasks.
+
+        A code-editing submission always replaces a file's entire content
+        (CodeEditorOutput.edits[i].content is "Complete new content for the
+        file"), so a partial symbol range can never safely become that
+        replacement — whatever the file's author didn't see gets silently
+        dropped. Enforced here deterministically rather than left to the
+        discovery prompt, since relying on the model to always choose
+        full=true is exactly the kind of instruction-following that already
+        failed in production. Scaffold tasks are exempt: they create brand
+        new files, so there's no existing content to lose.
+        """
+        if task.agent_role == AgentRole.SCAFFOLD_AGENT:
+            return result
+        seen_files: set[str] = set()
+        sections: list[DiscoveredSection] = []
+        for s in result.sections:
+            if s.file in seen_files:
+                continue
+            seen_files.add(s.file)
+            sections.append(
+                s.model_copy(update={"symbol": None, "start_line": None, "end_line": None, "full": True})
+            )
+        return DiscoveryResult(sections=sections, status=result.status)
 
     @staticmethod
     def _assistant_message(turn: AgenticTurn) -> dict:
@@ -154,19 +182,8 @@ class CodeDiscoveryAgent:
             return self._list_subdirectories(arguments.get("directory", "."), root)
         return f"Unknown tool: {name}"
 
-    @staticmethod
-    def _resolve_within_root(directory: str, root: str) -> Path | None:
-        """Return the resolved path only if it stays inside root; None otherwise."""
-        root_resolved = Path(root).resolve()
-        candidate = (root_resolved / directory).resolve()
-        try:
-            candidate.relative_to(root_resolved)
-            return candidate
-        except ValueError:
-            return None
-
     def _read_agent_md(self, directory: str, root: str) -> str:
-        safe = self._resolve_within_root(directory, root)
+        safe = resolve_within_root(directory, root)
         if safe is None:
             return f"Access denied: {directory!r} is outside the project repo"
         path = safe / "agent.md"
@@ -175,7 +192,7 @@ class CodeDiscoveryAgent:
         return path.read_text(encoding="utf-8")
 
     def _list_subdirectories(self, directory: str, root: str) -> str:
-        safe = self._resolve_within_root(directory, root)
+        safe = resolve_within_root(directory, root)
         if safe is None:
             return f"Access denied: {directory!r} is outside the project repo"
         if not safe.is_dir():

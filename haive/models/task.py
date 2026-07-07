@@ -1,8 +1,10 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from haive.models.enums import AgentRole, Complexity, TaskStatus
+
+_MAX_ATTEMPT_LOG_REASON_CHARS = 500
 
 
 class Project(BaseModel):
@@ -37,10 +39,25 @@ class AttemptLogEntry(BaseModel):
     attempt: int
     reason:  str
 
+    @field_validator("reason")
+    @classmethod
+    def _truncate_reason(cls, v: str) -> str:
+        """Bound at the source, since this reaches the orchestrator two ways:
+        directly via TaskViewBuilder (record.attempt_log), and indirectly via
+        a GitHub comment (_format_attempt_summary) read back as new_comments
+        on a later run. An unbounded raw model output here (e.g. from a
+        schema-validation failure) can bloat the orchestrator's prompt enough
+        to break its own JSON output.
+        """
+        if len(v) <= _MAX_ATTEMPT_LOG_REASON_CHARS:
+            return v
+        return v[:_MAX_ATTEMPT_LOG_REASON_CHARS].rstrip() + "… [truncated]"
+
 
 class VerdictSummary(BaseModel):
     passed: bool
     reason: str
+    infeasible: bool = False
 
 
 class TokenUsage(BaseModel):
@@ -59,6 +76,7 @@ class TaskExecutionRecord(BaseModel):
     prompt_version: str | None = None
     changed_files:  list[str] = Field(default_factory=list)
     pr_id:          str | None = None
+    merged:         bool = True
     completed_at:   datetime | None = None
     token_usage:    TokenUsage | None = None
     executor_start: datetime | None = None

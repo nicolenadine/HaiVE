@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Haive is a multi-provider AI agent harness for coordinating software development work. A human creates a project in their PM tool of choice (GitHub Issues, Linear, Jira) and points haive at it; the orchestrator reads the project description, creates tasks in the PM tool, and routes each task to a disposable task executor. Executors run on the model tier appropriate for each task's complexity, with automatic retry and model escalation. When a task passes internal review, the executor submits a PR targeting the project branch and auto-merges it — no human input required. When a task exhausts all retries, the executor flags it `needs-human-review`, leaves a comment summarizing every attempt and all reviewer feedback, and haive continues with independent tasks. The human adds context as a task comment and re-runs haive. When all tasks complete, haive opens a PR from the project branch to main for final human review. All decisions and outputs are observable via OpenTelemetry.
+Haive is a multi-provider AI agent harness for coordinating software development work. A human creates a project in their PM tool of choice (GitHub Issues, Linear, Jira) and points haive at it; the orchestrator reads the project description, creates tasks in the PM tool, and routes each task to a disposable task executor. Executors run on the model tier appropriate for each task's complexity, with automatic retry and model escalation. When a task passes internal review, the executor submits a PR targeting the project branch and auto-merges it — no human input required. When a task exhausts all retries, the executor flags it `needs-human-review`, leaves a comment summarizing every attempt and all reviewer feedback, and haive continues with independent tasks. If the reviewer determines a task's acceptance criteria are architecturally unsatisfiable rather than merely unmet, the orchestrator can automatically create a corrected follow-up task on the next wave without waiting for human input, bounded by `max_recovery_depth`. When all tasks complete, haive opens a PR from the project branch to main for final human review. All decisions and outputs are observable via OpenTelemetry.
 
 ## Non-Goals (for the initial version)
 
-- Fully autonomous development without human oversight
+- Unbounded autonomy — haive runs a capped number of waves automatically per invocation (`max_waves_per_run`) and always stops and surfaces to a human when genuinely stalled or the cap is reached; it does not run indefinitely without oversight
 - Multi-user collaboration or shared state
 - Production-grade distributed execution
 - Advanced UI or full IDE integration
@@ -141,7 +141,7 @@ Haive accesses the PM tool and the VCS host through separate pluggable adapter i
 
 ### 1. Harness CLI
 
-User-facing entry point. Accepts a GitHub Milestone ID or number via `--milestone <id>`. Initializes the observability layer (registers OTel instrumentors, configures Phoenix OTLP exporter). Drives the orchestration loop. Streams task status to the terminal. Exits after each wave of task PRs is submitted; re-invoked by the human to continue after addressing any `needs-human-review` Issues.
+User-facing entry point. Accepts a GitHub Milestone ID or number via `--milestone <id>`. Initializes the observability layer (registers OTel instrumentors, configures Phoenix OTLP exporter). Drives the orchestration loop across up to `max_waves_per_run` automatic waves (planning, executing, replanning) per invocation. Streams task status to the terminal. Stops automatically — before the wave cap — whenever the project is done or the orchestrator has no further automatic action to take (e.g. a task genuinely needs human input); re-invoked by the human to continue after addressing any `needs-human-review` Issues or once the wave cap is reached.
 
 Technology: Typer. Config loaded via pydantic-settings from the active named config (`~/.haive/configs/<active>.env`). Named configs are created and switched with `haive config` subcommands — no flags required on `haive run`.
 

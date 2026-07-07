@@ -49,14 +49,19 @@ class Settings(BaseSettings):
     # Recovery
     max_recovery_depth: int = 3
 
+    # Autonomous run loop
+    max_waves_per_run: int = 2
+
     # Concurrency
     max_executors: int = 4
 
-    # Observability
+    # Observability — disabled by default; set OBSERVABILITY_ENABLED=true to activate
+    observability_enabled: bool = False
     phoenix_otlp_endpoint: str = "http://localhost:6006/v1/traces"
 
     # Runtime flags
     dry_run: bool = False
+    auto_merge: bool = True
 
     # Providers
     anthropic_api_key: str | None = None

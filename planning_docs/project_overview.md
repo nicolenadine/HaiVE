@@ -353,7 +353,7 @@ These should be answered during the design process:
 
 The initial version does not need to support:
 
-* Fully autonomous long-running development without human oversight
+* Unbounded, indefinite autonomy — `haive run` loops automatically across a capped number of waves per invocation (`max_waves_per_run`) and always stops to surface to a human when genuinely stalled or the cap is reached
 * Complex multi-user collaboration
 * Production-grade distributed execution
 * Perfect model routing

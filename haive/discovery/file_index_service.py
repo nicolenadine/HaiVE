@@ -9,8 +9,10 @@ from haive.discovery.agent_md import AgentMdValidator
 from haive.discovery.agent_md_generation_agent import AgentMdGenerationAgent
 from haive.discovery.constants import (
     AGENT_MD_MAX_GENERATION_RETRIES,
+    ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET,
     SOURCE_EXTENSIONS,
 )
+from haive.discovery.symbol_line_corrector import correct_line_ranges
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
 from haive.llm.token_counter import TokenCounter
@@ -37,6 +39,62 @@ class FileIndexService:
         dirs = list(self._walk_source_dirs(root, patterns))
         for dir_path, source_files, subdirs in reversed(dirs):
             self._generate_for_dir(dir_path, source_files, subdirs, root)
+
+    def read_repo_map(
+        self, root: str, token_budget: int = ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET
+    ) -> str:
+        """Concatenate every existing agent.md under root into one repo map.
+
+        Root-to-leaf order (os.walk topdown) means truncation on a tight
+        budget drops the least-central (deepest) directories first, keeping
+        the broadest summary intact.
+        """
+        patterns = self._load_gitignore_patterns(root)
+        blocks: list[str] = []
+        tokens_used = 0
+
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+            dirnames[:] = sorted(d for d in dirnames if not self._should_skip(d, patterns))
+            if "agent.md" not in filenames:
+                continue
+
+            rel = os.path.relpath(dirpath, root)
+            label = "." if rel == "." else rel
+            content = Path(dirpath, "agent.md").read_text(encoding="utf-8").strip()
+            block = f"### {label}/\n\n{content}"
+
+            block_tokens = TokenCounter.estimate(block)
+            if tokens_used + block_tokens > token_budget:
+                break
+            blocks.append(block)
+            tokens_used += block_tokens
+
+        return "\n\n".join(blocks)
+
+    def resync_line_ranges(self, root: str) -> list[str]:
+        """Re-apply AST-based line-range correction to every existing agent.md.
+
+        Pure AST parsing against the current file content — no LLM call.
+        Catches drift introduced by edits that bypassed generate_all()/
+        update_after_task() (e.g. manual edits made outside haive's own
+        pipeline). Returns the root-relative paths of agent.md files whose
+        content changed.
+        """
+        patterns = self._load_gitignore_patterns(root)
+        touched: list[str] = []
+
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+            dirnames[:] = sorted(d for d in dirnames if not self._should_skip(d, patterns))
+            if "agent.md" not in filenames:
+                continue
+            agent_md_path = os.path.join(dirpath, "agent.md")
+            original = Path(agent_md_path).read_text(encoding="utf-8")
+            corrected = correct_line_ranges(original, dirpath)
+            if corrected != original:
+                Path(agent_md_path).write_text(corrected, encoding="utf-8")
+                touched.append(os.path.relpath(agent_md_path, root))
+
+        return touched
 
     def load_sections(
         self, result: DiscoveryResult, root: str, token_budget: int
@@ -78,7 +136,7 @@ class FileIndexService:
 
         return loaded
 
-    def update_after_task(self, changed_files: list[str], root: str) -> None:
+    def update_after_task(self, changed_files: list[str], root: str) -> list[str]:
         """Incrementally update agent.md files for directories touched by a task.
 
         Groups changed_files by directory. For each affected directory:
@@ -87,6 +145,10 @@ class FileIndexService:
           those entries, preserving all others verbatim.
         - New directory (no existing agent.md): falls back to generate().
         Non-source files and agent.md itself are ignored.
+
+        Returns the repo-relative agent.md paths actually written, so the
+        caller can include them in the same commit as the task's own edits
+        (they're not otherwise picked up automatically).
         """
         from collections import defaultdict
 
@@ -104,14 +166,18 @@ class FileIndexService:
             else:
                 by_dir[dir_rel]["deleted"].append(filename)
 
+        touched: set[str] = set()
+
         for dir_rel, changes in by_dir.items():
             dir_abs = os.path.join(root, dir_rel) if dir_rel else root
             agent_md_path = Path(dir_abs) / "agent.md"
+            agent_md_rel = os.path.join(dir_rel, "agent.md") if dir_rel else "agent.md"
 
             if changes["deleted"] and agent_md_path.is_file():
                 content = agent_md_path.read_text(encoding="utf-8")
                 content = self._remove_deleted_entries(content, set(changes["deleted"]))
                 agent_md_path.write_text(content, encoding="utf-8")
+                touched.add(agent_md_rel)
                 # TODO: if this deletion empties the directory of source files, remove
                 # its agent.md and update the parent's agent.md to drop the subdir entry
                 # (build_plan.md §Step15).
@@ -133,6 +199,9 @@ class FileIndexService:
                         and not d.startswith(".")
                     )
                     self._generate_for_dir(dir_abs, source_files, subdirs, root)
+                touched.add(agent_md_rel)
+
+        return sorted(touched)
 
     def validate_all(self, root: str) -> dict[str, list[str]]:
         """Return {relative_path: [violations]} for every agent.md found under root.
@@ -193,6 +262,8 @@ class FileIndexService:
                 f"Last violations: {violations}"
             )
 
+        content = correct_line_ranges(content, dir_path)
+
         Path(os.path.join(dir_path, "agent.md")).write_text(
             content + "\n", encoding="utf-8"
         )
@@ -250,6 +321,8 @@ class FileIndexService:
                 f"{AGENT_MD_MAX_GENERATION_RETRIES} attempts. "
                 f"Last violations: {violations}"
             )
+
+        content = correct_line_ranges(content, dir_path)
 
         Path(os.path.join(dir_path, "agent.md")).write_text(
             content + "\n", encoding="utf-8"

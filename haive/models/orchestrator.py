@@ -29,6 +29,7 @@ class OrchestratorInput(BaseModel):
     tasks:         list[OrchestratorTaskView]
     new_comments:  list[TaskComment]
     agent_summary: str
+    repo_map:      str = ""
 
 
 class NewTask(BaseModel):

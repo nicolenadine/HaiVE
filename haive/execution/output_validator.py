@@ -51,7 +51,7 @@ class OutputValidator:
         if schema_class is None:
             raise OutputValidationError(role, raw, f"No schema registered for role '{role.value}'")
 
-        json_str = self._extract_json(raw)
+        json_str = self.extract_json(raw)
         if json_str is None:
             raise OutputValidationError(role, raw, "Could not locate a JSON object in the output")
 
@@ -61,7 +61,7 @@ class OutputValidator:
             raise OutputValidationError(role, raw, str(e)) from e
 
     @staticmethod
-    def _extract_json(raw: str) -> str | None:
+    def extract_json(raw: str) -> str | None:
         text = raw.strip()
 
         # Strategy 1: bare JSON object
