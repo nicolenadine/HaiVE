@@ -296,6 +296,32 @@ class TestMergeFailure:
         # be left stuck on the task branch — checkout_branch always runs.
         svc["vcs"].checkout_branch.assert_called_once_with("main")
 
+    def test_checkout_branch_runs_when_verdict_is_infeasible(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_infeasible_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+
+        executor.run(make_task(), **svc)
+
+        svc["vcs"].checkout_branch.assert_called_once_with("main")
+
+    def test_checkout_branch_runs_when_all_tiers_exhausted(self, tmp_path):
+        executor = make_executor(tmp_path, low_attempts=1, medium_attempts=1)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call.return_value = make_editor_response()
+        executor._review_agent.review.return_value = make_failing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+
+        executor.run(make_task(), **svc)
+
+        svc["vcs"].checkout_branch.assert_called_once_with("main")
+
 
 # ── retry / feedback ──────────────────────────────────────────────────────────
 

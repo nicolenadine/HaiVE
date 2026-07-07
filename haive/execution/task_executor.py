@@ -120,108 +120,134 @@ class TaskExecutor:
         self._on_status(f"  [#{task.task_id}] creating branch {task_branch}")
         vcs.create_branch(task_branch, self._project_branch)
 
-        for complexity, tier in self._get_tier_ladder(task.complexity):
-            token_budget = int(tier.context_budget * agent_config.context_budget_multiplier)
-            self._on_status(f"  [#{task.task_id}] discovering context  [tier={complexity.value}, budget={token_budget:,}]")
-            discovery_result = discovery_agent.discover(task, self._root, token_budget)
-            loaded_sections = file_index.load_sections(discovery_result, self._root, token_budget)
-            self._on_status(f"  [#{task.task_id}] loaded {len(loaded_sections)} section(s)")
-            discovery_status = self._compute_discovery_status(discovery_result, task.agent_role)
-            discovery_note = (
-                "No existing code found for this task."
-                if discovery_status == "empty_unexpected"
-                else ""
-            )
-            consecutive_api_errors = 0
-
-            for _ in range(tier.max_attempts):
-                context = self._assembler.assemble(
-                    task=task,
-                    loaded_sections=loaded_sections,
-                    discovery_status=discovery_status,
-                    dependency_outputs=dependency_outputs,
-                    retry_feedback=retry_feedback or None,
+        # Every exit path below — success, infeasible, all-tiers-exhausted, or
+        # any unexpected exception (e.g. the APIError re-raise after
+        # _MAX_API_ERRORS) — must leave the local repo back on project_branch.
+        # A single try/finally around the whole attempt loop guarantees that
+        # regardless of which path is taken, rather than requiring every
+        # return site to remember it individually.
+        try:
+            for complexity, tier in self._get_tier_ladder(task.complexity):
+                token_budget = int(tier.context_budget * agent_config.context_budget_multiplier)
+                self._on_status(f"  [#{task.task_id}] discovering context  [tier={complexity.value}, budget={token_budget:,}]")
+                discovery_result = discovery_agent.discover(task, self._root, token_budget)
+                loaded_sections = file_index.load_sections(discovery_result, self._root, token_budget)
+                self._on_status(f"  [#{task.task_id}] loaded {len(loaded_sections)} section(s)")
+                discovery_status = self._compute_discovery_status(discovery_result, task.agent_role)
+                discovery_note = (
+                    "No existing code found for this task."
+                    if discovery_status == "empty_unexpected"
+                    else ""
                 )
+                consecutive_api_errors = 0
 
-                self._on_status(f"  [#{task.task_id}] LLM call  [attempt={attempt_num + 1}, tier={complexity.value}]")
-                try:
-                    response = self._model_client.call(
-                        tier, context, system_prompt, agent_config.max_tokens
-                    )
-                    consecutive_api_errors = 0
-                except APIError as exc:
-                    consecutive_api_errors += 1
-                    self._on_status(f"  [#{task.task_id}] API error (attempt not counted): {exc}")
-                    record.attempt_log.append(
-                        AttemptLogEntry(
-                            tier=complexity,
-                            attempt=attempt_num,
-                            reason=f"API error: {exc}",
-                        )
-                    )
-                    if consecutive_api_errors >= _MAX_API_ERRORS:
-                        raise
-                    continue
-
-                attempt_num += 1
-
-                try:
-                    agent_output = self._validator.validate(response.content, task.agent_role)
-                except OutputValidationError as exc:
-                    self._on_status(f"  [#{task.task_id}] schema validation failed — retrying")
-                    record.attempt_log.append(
-                        AttemptLogEntry(
-                            tier=complexity,
-                            attempt=attempt_num,
-                            reason=f"Schema: {exc}",
-                        )
-                    )
-                    retry_feedback = [str(exc)]
-                    continue
-
-                shrinkage_reason = _check_for_catastrophic_deletion(agent_output, self._root)
-                if shrinkage_reason is not None:
-                    self._on_status(f"  [#{task.task_id}] content check failed — retrying")
-                    record.attempt_log.append(
-                        AttemptLogEntry(
-                            tier=complexity,
-                            attempt=attempt_num,
-                            reason=shrinkage_reason,
-                        )
-                    )
-                    retry_feedback = [shrinkage_reason]
-                    continue
-
-                self._on_status(f"  [#{task.task_id}] reviewing output  [{response.model_used}]")
-                verdict = self._review_agent.review(
-                    task=task,
-                    agent_output=agent_output,
-                    loaded_sections=loaded_sections,
-                    discovery_status=discovery_status,
-                    discovery_note=discovery_note,
-                )
-
-                if verdict.passed:
-                    self._on_status(f"  [#{task.task_id}] review passed — applying output")
-                    return self._finalize_success(
+                for _ in range(tier.max_attempts):
+                    context = self._assembler.assemble(
                         task=task,
-                        project_id=project_id,
-                        record=record,
-                        agent_output=agent_output,
-                        verdict=verdict,
-                        task_branch=task_branch,
-                        attempt_num=attempt_num,
-                        complexity=complexity,
-                        response_model=response.model_used,
-                        prompt_version=agent_config.prompt_version,
-                        file_index=file_index,
-                        pm=pm,
-                        vcs=vcs,
-                        state_store=state_store,
+                        loaded_sections=loaded_sections,
+                        discovery_status=discovery_status,
+                        dependency_outputs=dependency_outputs,
+                        retry_feedback=retry_feedback or None,
                     )
 
-                if verdict.infeasible:
-                    self._on_status(f"  [#{task.task_id}] acceptance criteria infeasible — {verdict.reason}")
+                    self._on_status(f"  [#{task.task_id}] LLM call  [attempt={attempt_num + 1}, tier={complexity.value}]")
+                    try:
+                        response = self._model_client.call(
+                            tier, context, system_prompt, agent_config.max_tokens
+                        )
+                        consecutive_api_errors = 0
+                    except APIError as exc:
+                        consecutive_api_errors += 1
+                        self._on_status(f"  [#{task.task_id}] API error (attempt not counted): {exc}")
+                        record.attempt_log.append(
+                            AttemptLogEntry(
+                                tier=complexity,
+                                attempt=attempt_num,
+                                reason=f"API error: {exc}",
+                            )
+                        )
+                        if consecutive_api_errors >= _MAX_API_ERRORS:
+                            raise
+                        continue
+
+                    attempt_num += 1
+
+                    try:
+                        agent_output = self._validator.validate(response.content, task.agent_role)
+                    except OutputValidationError as exc:
+                        self._on_status(f"  [#{task.task_id}] schema validation failed — retrying")
+                        record.attempt_log.append(
+                            AttemptLogEntry(
+                                tier=complexity,
+                                attempt=attempt_num,
+                                reason=f"Schema: {exc}",
+                            )
+                        )
+                        retry_feedback = [str(exc)]
+                        continue
+
+                    shrinkage_reason = _check_for_catastrophic_deletion(agent_output, self._root)
+                    if shrinkage_reason is not None:
+                        self._on_status(f"  [#{task.task_id}] content check failed — retrying")
+                        record.attempt_log.append(
+                            AttemptLogEntry(
+                                tier=complexity,
+                                attempt=attempt_num,
+                                reason=shrinkage_reason,
+                            )
+                        )
+                        retry_feedback = [shrinkage_reason]
+                        continue
+
+                    self._on_status(f"  [#{task.task_id}] reviewing output  [{response.model_used}]")
+                    verdict = self._review_agent.review(
+                        task=task,
+                        agent_output=agent_output,
+                        loaded_sections=loaded_sections,
+                        discovery_status=discovery_status,
+                        discovery_note=discovery_note,
+                    )
+
+                    if verdict.passed:
+                        self._on_status(f"  [#{task.task_id}] review passed — applying output")
+                        return self._finalize_success(
+                            task=task,
+                            project_id=project_id,
+                            record=record,
+                            agent_output=agent_output,
+                            verdict=verdict,
+                            task_branch=task_branch,
+                            attempt_num=attempt_num,
+                            complexity=complexity,
+                            response_model=response.model_used,
+                            prompt_version=agent_config.prompt_version,
+                            file_index=file_index,
+                            pm=pm,
+                            vcs=vcs,
+                            state_store=state_store,
+                        )
+
+                    if verdict.infeasible:
+                        self._on_status(f"  [#{task.task_id}] acceptance criteria infeasible — {verdict.reason}")
+                        record.attempt_log.append(
+                            AttemptLogEntry(
+                                tier=complexity,
+                                attempt=attempt_num,
+                                reason=verdict.reason,
+                            )
+                        )
+                        record.verdict = verdict.to_summary()
+                        pm.add_comment(task.task_id, _format_infeasible_summary(verdict.reason))
+                        pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
+                        record.total_attempts = attempt_num
+                        record.executor_end = _utcnow()
+                        state_store.merge_task_record(project_id, task.task_id, record)
+                        return record
+
+                    self._on_status(f"  [#{task.task_id}] review failed — {verdict.reason}")
+                    if verdict.suggestions:
+                        for suggestion in verdict.suggestions:
+                            self._on_status(f"  [#{task.task_id}]   suggestion: {suggestion}")
                     record.attempt_log.append(
                         AttemptLogEntry(
                             tier=complexity,
@@ -229,35 +255,18 @@ class TaskExecutor:
                             reason=verdict.reason,
                         )
                     )
-                    record.verdict = verdict.to_summary()
-                    pm.add_comment(task.task_id, _format_infeasible_summary(verdict.reason))
-                    pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
-                    record.total_attempts = attempt_num
-                    record.executor_end = _utcnow()
-                    state_store.merge_task_record(project_id, task.task_id, record)
-                    return record
+                    retry_feedback = verdict.suggestions
 
-                self._on_status(f"  [#{task.task_id}] review failed — {verdict.reason}")
-                if verdict.suggestions:
-                    for suggestion in verdict.suggestions:
-                        self._on_status(f"  [#{task.task_id}]   suggestion: {suggestion}")
-                record.attempt_log.append(
-                    AttemptLogEntry(
-                        tier=complexity,
-                        attempt=attempt_num,
-                        reason=verdict.reason,
-                    )
-                )
-                retry_feedback = verdict.suggestions
-
-        # All tiers exhausted
-        self._on_status(f"  [#{task.task_id}] all tiers exhausted — needs human review")
-        pm.add_comment(task.task_id, _format_attempt_summary(record.attempt_log))
-        pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
-        record.total_attempts = attempt_num
-        record.executor_end = _utcnow()
-        state_store.merge_task_record(project_id, task.task_id, record)
-        return record
+            # All tiers exhausted
+            self._on_status(f"  [#{task.task_id}] all tiers exhausted — needs human review")
+            pm.add_comment(task.task_id, _format_attempt_summary(record.attempt_log))
+            pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
+            record.total_attempts = attempt_num
+            record.executor_end = _utcnow()
+            state_store.merge_task_record(project_id, task.task_id, record)
+            return record
+        finally:
+            vcs.checkout_branch(self._project_branch)
 
     # ── private helpers ───────────────────────────────────────────────────────
 
@@ -279,56 +288,51 @@ class TaskExecutor:
         state_store: StateStore,
     ) -> TaskExecutionRecord:
         # create_branch() already checked the local working directory out onto
-        # task_branch (in _run_inner, before this method runs). Everything below
-        # can fail in ways we don't otherwise handle (network hiccups, GitHub API
-        # errors) — the finally block guarantees the local repo always gets back
-        # to project_branch, so a failure here never leaves it stuck on a task
-        # branch for the next run to trip over.
-        try:
-            task_changed_files = _apply_output(agent_output, self._root)
-            agent_md_touched = file_index.update_after_task(task_changed_files, self._root)
-            changed_files = sorted(set(task_changed_files) | set(agent_md_touched))
-            self._on_status(f"  [#{task.task_id}] pushing {len(changed_files)} file(s): {', '.join(changed_files)}")
-            vcs.push_commits(
-                task_branch,
-                changed_files,
-                f"haive: {task.task_id} {task.title}",
-            )
-            pr_id = vcs.create_pr(
-                f"Task {task.task_id}: {task.title}",
-                verdict.reason,
-                task_branch,
-                self._project_branch,
-            )
-            self._on_status(f"  [#{task.task_id}] PR created: #{pr_id}" + ("" if self._auto_merge else " (not auto-merged)"))
-            vcs.add_pr_comment(pr_id, _format_pr_comment(record.attempt_log, verdict))
+        # task_branch (in _run_inner, before this method runs). _run_inner's
+        # own try/finally guarantees the local repo gets back to project_branch
+        # regardless of what happens here.
+        task_changed_files = _apply_output(agent_output, self._root)
+        agent_md_touched = file_index.update_after_task(task_changed_files, self._root)
+        changed_files = sorted(set(task_changed_files) | set(agent_md_touched))
+        self._on_status(f"  [#{task.task_id}] pushing {len(changed_files)} file(s): {', '.join(changed_files)}")
+        vcs.push_commits(
+            task_branch,
+            changed_files,
+            f"haive: {task.task_id} {task.title}",
+        )
+        pr_id = vcs.create_pr(
+            f"Task {task.task_id}: {task.title}",
+            verdict.reason,
+            task_branch,
+            self._project_branch,
+        )
+        self._on_status(f"  [#{task.task_id}] PR created: #{pr_id}" + ("" if self._auto_merge else " (not auto-merged)"))
+        vcs.add_pr_comment(pr_id, _format_pr_comment(record.attempt_log, verdict))
 
-            if self._auto_merge:
-                if self._auto_merge_disabled_this_run:
-                    merged = False
-                    merge_exc_text = "auto-merge disabled for this run (repository does not support it)"
-                else:
-                    try:
-                        vcs.merge_pr(pr_id)
-                        merged, merge_exc_text = True, None
-                    except RuntimeError as exc:
-                        merged, merge_exc_text = False, str(exc)
-                        if "Auto merge is not allowed for this repository" in merge_exc_text:
-                            self._auto_merge_disabled_this_run = True
-
-                if merged:
-                    pm.update_status(task.task_id, TaskStatus.COMPLETE)
-                else:
-                    self._on_status(f"  [#{task.task_id}] auto-merge failed — leaving PR #{pr_id} open: {merge_exc_text}")
-                    note = _format_merge_failure_note(pr_id, merge_exc_text)
-                    vcs.add_pr_comment(pr_id, note)
-                    pm.add_comment(task.task_id, note)
-                    pm.update_status(task.task_id, TaskStatus.AWAITING_MERGE)
+        if self._auto_merge:
+            if self._auto_merge_disabled_this_run:
+                merged = False
+                merge_exc_text = "auto-merge disabled for this run (repository does not support it)"
             else:
-                merged = True  # --no-merge: deliberate, unchanged — still marks complete
+                try:
+                    vcs.merge_pr(pr_id)
+                    merged, merge_exc_text = True, None
+                except RuntimeError as exc:
+                    merged, merge_exc_text = False, str(exc)
+                    if "Auto merge is not allowed for this repository" in merge_exc_text:
+                        self._auto_merge_disabled_this_run = True
+
+            if merged:
                 pm.update_status(task.task_id, TaskStatus.COMPLETE)
-        finally:
-            vcs.checkout_branch(self._project_branch)
+            else:
+                self._on_status(f"  [#{task.task_id}] auto-merge failed — leaving PR #{pr_id} open: {merge_exc_text}")
+                note = _format_merge_failure_note(pr_id, merge_exc_text)
+                vcs.add_pr_comment(pr_id, note)
+                pm.add_comment(task.task_id, note)
+                pm.update_status(task.task_id, TaskStatus.AWAITING_MERGE)
+        else:
+            merged = True  # --no-merge: deliberate, unchanged — still marks complete
+            pm.update_status(task.task_id, TaskStatus.COMPLETE)
 
         now = _utcnow()
         record.verdict = verdict.to_summary()
