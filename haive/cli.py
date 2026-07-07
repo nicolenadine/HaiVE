@@ -1,3 +1,4 @@
+import json
 import shutil
 import time
 from datetime import datetime, timezone
@@ -57,14 +58,19 @@ def config_edit() -> None:
 
 
 @config_app.command("show")
-def config_show() -> None:
+def config_show(
+    json_flag: bool = typer.Option(False, "--json", is_flag=True, help="Output as JSON.")
+) -> None:
     """Show the active config. Sensitive values are masked."""
     values = ConfigManager.show()
-    if not values:
-        typer.echo("(empty config)")
-        return
-    for k, v in values.items():
-        typer.echo(f"{k}={v}")
+    if json_flag:
+        typer.echo(json.dumps(values))
+    else:
+        if not values:
+            typer.echo("(empty config)")
+            return
+        for k, v in values.items():
+            typer.echo(f"{k}={v}")
 
 
 @config_app.command("list")
