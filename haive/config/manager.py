@@ -75,6 +75,23 @@ class ConfigManager:
         cls._ACTIVE_FILE.write_text(name)
 
     @classmethod
+    def delete(cls, name: str) -> None:
+        cls._ensure_dirs()
+        path = cls._CONFIGS_DIR / f"{name}.env"
+        if not path.exists():
+            available = cls.list_configs()
+            msg = f"Config '{name}' does not exist."
+            if available:
+                msg += f" Available: {', '.join(available)}"
+            raise FileNotFoundError(msg)
+        if cls._peek_active_name() == name:
+            raise ValueError(
+                f"Cannot delete the active config '{name}'. "
+                "Switch to a different config first via 'haive config use'."
+            )
+        path.unlink()
+
+    @classmethod
     def set_value(cls, key: str, value: str) -> None:
         if not _VALID_KEY.match(key):
             raise ValueError(
