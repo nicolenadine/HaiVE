@@ -7,6 +7,6 @@ output_validator.py — Validates and extracts JSON output from LLM responses ag
   OutputValidator (class) — 46-88 — Extracts and validates JSON from raw LLM output against registered agent role schemas
   OutputValidationError (class) — 21-27 — Exception raised when agent output cannot be parsed or validated
 review_agent.py — LLM-as-judge for evaluating task agent output against acceptance criteria
-  ReviewAgent (class) — 36-232 — Reviews agent output with model escalation and on-demand file context requests
+  ReviewAgent (class) — 36-261 — Reviews agent output with model escalation and on-demand file context requests
 task_executor.py — End-to-end task execution orchestration from discovery through PR merge
-  TaskExecutor (class) — 36-365 — Executes tasks with tier ladder, context discovery, validation, and review loop
+  TaskExecutor (class) — 38-380 — Executes tasks with tier ladder, context discovery, validation, and review loop

@@ -12,6 +12,7 @@ from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
 from haive.models.discovery import DiscoveredSection, DiscoveryResult
+from haive.models.enums import AgentRole
 from haive.models.task import Task
 
 _TOOLS: list[dict] = [
@@ -105,7 +106,7 @@ class CodeDiscoveryAgent:
             messages.append(self._assistant_message(turn))
 
             if not turn.tool_calls:
-                return self._parse_result(turn.content or "")
+                return self._finalize(self._parse_result(turn.content or ""), task)
 
             for tc in turn.tool_calls:
                 result = self._execute_tool(tc.name, tc.arguments, root)
@@ -126,9 +127,36 @@ class CodeDiscoveryAgent:
             messages=messages,
             max_tokens=CODE_DISCOVERY_MAX_TOKENS,
         )
-        return self._parse_result(final.content or "")
+        return self._finalize(self._parse_result(final.content or ""), task)
 
     # ── internal helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _finalize(result: DiscoveryResult, task: Task) -> DiscoveryResult:
+        """Force full-file loading for every section on non-scaffold tasks.
+
+        A code-editing submission always replaces a file's entire content
+        (CodeEditorOutput.edits[i].content is "Complete new content for the
+        file"), so a partial symbol range can never safely become that
+        replacement — whatever the file's author didn't see gets silently
+        dropped. Enforced here deterministically rather than left to the
+        discovery prompt, since relying on the model to always choose
+        full=true is exactly the kind of instruction-following that already
+        failed in production. Scaffold tasks are exempt: they create brand
+        new files, so there's no existing content to lose.
+        """
+        if task.agent_role == AgentRole.SCAFFOLD_AGENT:
+            return result
+        seen_files: set[str] = set()
+        sections: list[DiscoveredSection] = []
+        for s in result.sections:
+            if s.file in seen_files:
+                continue
+            seen_files.add(s.file)
+            sections.append(
+                s.model_copy(update={"symbol": None, "start_line": None, "end_line": None, "full": True})
+            )
+        return DiscoveryResult(sections=sections, status=result.status)
 
     @staticmethod
     def _assistant_message(turn: AgenticTurn) -> dict:
