@@ -1,24 +1,25 @@
 ## Files
 
-__init__.py — Package initialization for haive
-cli.py — CLI entry point with commands for indexing, discovering, loading, and running the harness
-  config_create (function) — 18-25 — Create a new named configuration
-  config_use (function) — 29-36 — Activate a named configuration
-  config_set (function) — 40-50 — Set a KEY=VALUE in the active configuration
-  config_edit (function) — 54-56 — Open the active config in $EDITOR or nano
-  config_show (function) — 60-67 — Display the active config with sensitive values masked
-  config_list (function) — 71-80 — List all named configs with active marked by *
-  index (function) — 151-202 — Generate or validate per-directory agent.md index files
-  discover (function) — 208-269 — Run Code Discovery Agent to find relevant files for a task
-  load (function) — 275-341 — Discover relevant files and load their source content
-  run (function) — 347-634 — Execute haive harness for a project milestone across waves
-adapters/ — Project management and version control adapter interfaces for PM and VCS platforms
-config/ — Configuration management for named environments with validation and editing
-discovery/ — Agent.md indexing, code discovery navigation, and file content loading services
-execution/ — Task execution orchestration with context assembly, validation, and review loop
-llm/ — LLM client wrapper with multi-tier configuration, token counting, and agentic loops
-models/ — Pydantic domain models for tasks, state, orchestration, output schemas, and enums
-observability/ — OpenTelemetry tracing setup and span context managers for distributed tracing
-orchestration/ — Milestone decomposition orchestrator with example-based guidance and task scheduling
-persistence/ — Filesystem-based project state storage with file locking and atomic writes
-registry/ — Agent configuration registry loaded from YAML with per-role lookup
+__init__.py — Package initialization for haive framework
+cli.py — Command-line interface for indexing, discovering, loading, executing tasks, and managing configuration
+  config_create (function) — 18-25 — Creates a new named configuration file
+  config_use (function) — 29-36 — Activates a named configuration
+  config_set (function) — 40-50 — Sets a key-value pair in the active configuration
+  config_edit (function) — 54-56 — Opens the active configuration in the default editor
+  config_show (function) — 60-67 — Displays the active configuration with masked sensitive values
+  config_list (function) — 71-80 — Lists all available configurations with active marker
+  index (function) — 151-202 — Generates or validates per-directory agent.md index files
+  discover (function) — 208-269 — Runs code discovery agent to find relevant code sections for a task
+  load (function) — 275-341 — Combines discovery and loading to assemble context for a task
+  run (function) — 347-634 — Main orchestration loop executing tasks across waves with planning and review
+  prune_branches (function) — 640-697 — Deletes haive task branches whose PRs have been merged
+adapters/ — Project management and version control system adapter interfaces and implementations
+config/ — Configuration management for named configs and environment settings
+discovery/ — Code discovery agent and agent.md file indexing service for repository navigation
+execution/ — Task execution engine with LLM agent coordination, code generation, and PR workflow
+llm/ — LLM provider integration with multi-tier model configurations and token counting
+models/ — Pydantic data models for tasks, state, configuration, and orchestration
+observability/ — OpenTelemetry tracing and instrumentation setup for distributed tracing
+orchestration/ — Task orchestration engine with planning, examples, and dependency scheduling
+persistence/ — State management and persistence layer for projects and task execution records
+registry/ — Agent configuration registry for loading and managing agent definitions

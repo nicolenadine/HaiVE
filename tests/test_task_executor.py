@@ -9,9 +9,9 @@ import pytest
 from haive.execution.output_validator import OutputValidationError
 from haive.execution.review_agent import ReviewAgent
 from haive.execution.task_executor import TaskExecutor, _apply_output
+from haive.llm.agentic_turn import AgenticTurn
 from haive.llm.errors import APIError
 from haive.llm.model_client import ModelClient
-from haive.llm.model_response import ModelResponse
 from haive.llm.tier import Tier
 from haive.llm.tier_config import TierConfig
 from haive.models.agent_output import CodeEditorOutput, FileEdit, FileToCreate, ScaffoldAgentOutput
@@ -69,12 +69,12 @@ def make_agent_config(**kwargs) -> AgentConfig:
     return AgentConfig(**(defaults | kwargs))
 
 
-def make_editor_response() -> ModelResponse:
+def make_editor_turn() -> AgenticTurn:
     payload = {
         "edits": [{"path": "haive/client.py", "content": "class Client: pass"}],
         "notes": "",
     }
-    return ModelResponse(content=json.dumps(payload), model_used="test-model", token_usage=None)
+    return AgenticTurn(tool_calls=[], content=json.dumps(payload), model_used="test-model")
 
 
 def make_passing_review() -> ReviewVerdict:
@@ -150,7 +150,7 @@ class TestHappyPath:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -171,7 +171,7 @@ class TestHappyPath:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -180,7 +180,7 @@ class TestHappyPath:
 
         record = executor.run(make_task(), **svc)
 
-        # make_editor_response() edits haive/client.py; update_after_task adds haive/agent.md.
+        # make_editor_turn() edits haive/client.py; update_after_task adds haive/agent.md.
         svc["vcs"].push_commits.assert_called_once()
         _, args, _ = svc["vcs"].push_commits.mock_calls[0]
         assert args[1] == ["haive/agent.md", "haive/client.py"]
@@ -190,7 +190,7 @@ class TestHappyPath:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -214,7 +214,7 @@ class TestMergeFailure:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -238,7 +238,7 @@ class TestMergeFailure:
         executor = make_executor(tmp_path, auto_merge=False)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -254,7 +254,7 @@ class TestMergeFailure:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -283,7 +283,7 @@ class TestMergeFailure:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -300,7 +300,7 @@ class TestMergeFailure:
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_infeasible_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -313,7 +313,7 @@ class TestMergeFailure:
         executor = make_executor(tmp_path, low_attempts=1, medium_attempts=1)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_failing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -330,7 +330,7 @@ class TestRetry:
         executor = make_executor(tmp_path, low_attempts=2)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.side_effect = [
             make_failing_review(["fix import"]),
             make_passing_review(),
@@ -358,9 +358,9 @@ class TestRetry:
         executor = make_executor(tmp_path, low_attempts=2)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.side_effect = [
-            ModelResponse(content="not json", model_used="test-model", token_usage=None),
-            make_editor_response(),
+        executor._model_client.call_single.side_effect = [
+            AgenticTurn(tool_calls=[], content="not json", model_used="test-model"),
+            make_editor_turn(),
         ]
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
@@ -376,9 +376,9 @@ class TestRetry:
         executor = make_executor(tmp_path, low_attempts=2)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.side_effect = [
-            ModelResponse(content="not json", model_used="test-model", token_usage=None),
-            make_editor_response(),
+        executor._model_client.call_single.side_effect = [
+            AgenticTurn(tool_calls=[], content="not json", model_used="test-model"),
+            make_editor_turn(),
         ]
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
@@ -402,22 +402,24 @@ class TestCatastrophicDeletionCheck:
         (tmp_path / "haive").mkdir(parents=True, exist_ok=True)
         (tmp_path / "haive" / "client.py").write_text(existing)
 
-        shrinking_response = ModelResponse(
+        shrinking_response = AgenticTurn(
+            tool_calls=[],
             content=json.dumps({
                 "edits": [{"path": "haive/client.py", "content": "x = 1"}],
                 "notes": "",
             }),
-            model_used="test-model", token_usage=None,
+            model_used="test-model",
         )
         # Second attempt must not itself trip the shrinkage check (still under 40 lines on disk).
-        recovering_response = ModelResponse(
+        recovering_response = AgenticTurn(
+            tool_calls=[],
             content=json.dumps({
                 "edits": [{"path": "haive/client.py", "content": "\n".join(f"line {i}" for i in range(25))}],
                 "notes": "",
             }),
-            model_used="test-model", token_usage=None,
+            model_used="test-model",
         )
-        executor._model_client.call.side_effect = [shrinking_response, recovering_response]
+        executor._model_client.call_single.side_effect = [shrinking_response, recovering_response]
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -438,7 +440,7 @@ class TestCatastrophicDeletionCheck:
         (tmp_path / "haive").mkdir(parents=True, exist_ok=True)
         (tmp_path / "haive" / "client.py").write_text("line1\nline2\n")
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -454,7 +456,7 @@ class TestCatastrophicDeletionCheck:
         svc = make_services(tmp_path)
         # haive/client.py does not exist on disk yet
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -473,7 +475,7 @@ class TestTierEscalation:
         executor = make_executor(tmp_path, low_attempts=1, medium_attempts=1)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.side_effect = [
             make_failing_review(),    # LOW tier fails
             make_passing_review(),    # MEDIUM tier passes
@@ -494,7 +496,7 @@ class TestTierEscalation:
         svc = make_services(tmp_path)
 
         executor._tier_config.high = make_tier(max_attempts=1)
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_failing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -511,7 +513,7 @@ class TestTierEscalation:
         svc = make_services(tmp_path)
 
         executor._tier_config.high = make_tier(max_attempts=2)
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_infeasible_review(
             "on_task_complete never receives blocked-status records."
         )
@@ -520,7 +522,7 @@ class TestTierEscalation:
 
         record = executor.run(make_task(complexity=Complexity.LOW), **svc)
 
-        assert executor._model_client.call.call_count == 1
+        assert executor._model_client.call_single.call_count == 1
         assert executor._review_agent.review.call_count == 1
         svc["pm"].update_status.assert_called_with("42", TaskStatus.NEEDS_HUMAN_REVIEW)
         svc["pm"].add_comment.assert_called_once()
@@ -536,7 +538,7 @@ class TestTierEscalation:
         svc = make_services(tmp_path)
 
         executor._tier_config.high = make_tier(max_attempts=1)
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
@@ -560,7 +562,7 @@ class TestDiscoveryStatus:
         executor = make_executor(tmp_path, low_attempts=1)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result(has_sections=False)
         svc["file_index"].load_sections.return_value = []
@@ -580,10 +582,10 @@ class TestDiscoveryStatus:
             role=AgentRole.SCAFFOLD_AGENT,
             system_prompt="prompts/implementation_agent.md",
         )
-        executor._model_client.call.return_value = ModelResponse(
+        executor._model_client.call_single.return_value = AgenticTurn(
+            tool_calls=[],
             content=json.dumps({"files": [{"path": "new.py", "content": "x=1"}], "notes": ""}),
             model_used="test-model",
-            token_usage=None,
         )
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result(has_sections=False)
@@ -600,7 +602,7 @@ class TestDiscoveryStatus:
         executor = make_executor(tmp_path, low_attempts=1)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.return_value = make_editor_response()
+        executor._model_client.call_single.return_value = make_editor_turn()
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result(has_sections=True)
         svc["file_index"].load_sections.return_value = []
@@ -652,9 +654,9 @@ class TestAPIErrorHandling:
         executor = make_executor(tmp_path, low_attempts=2)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.side_effect = [
+        executor._model_client.call_single.side_effect = [
             APIError("timeout"),
-            make_editor_response(),
+            make_editor_turn(),
         ]
         executor._review_agent.review.return_value = make_passing_review()
         svc["discovery_agent"].discover.return_value = make_discovery_result()
@@ -669,7 +671,7 @@ class TestAPIErrorHandling:
         executor = make_executor(tmp_path, low_attempts=5)
         svc = make_services(tmp_path)
 
-        executor._model_client.call.side_effect = APIError("persistent failure")
+        executor._model_client.call_single.side_effect = APIError("persistent failure")
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
 

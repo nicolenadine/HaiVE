@@ -1,5 +1,5 @@
 ## Files
 
-__init__.py — Package initialization for adapters
-pm/ — Project management adapters providing unified interface to PM platforms like GitHub
-vcs/ — Version control adapters providing unified interface to VCS platforms like GitHub
+__init__.py — Package initialization exposing adapter interfaces and implementations
+pm/ — Project management adapters for syncing tasks with external systems
+vcs/ — Version control system adapters for branch and pull request management

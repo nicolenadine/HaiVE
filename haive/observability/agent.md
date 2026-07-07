@@ -1,8 +1,8 @@
 ## Files
 
 __init__.py — Package initialization for observability module
-setup.py — OTel tracing and LiteLLM auto-instrumentation configuration
-  setup_observability (function) — 14-32 — Configure OpenTelemetry tracing and LiteLLM instrumentation with OTLP exporter
-spans.py — Context managers for distributed tracing spans
-  task_span (function) — 20-30 — Context manager for task execution span with task identity attributes
-  run_span (function) — 34-38 — Context manager for full haive run span with project identity
+setup.py — OpenTelemetry tracer setup and LiteLLM instrumentation
+  setup_observability (function) — 14-32 — Configures OTel tracing with Phoenix OTLP exporter and LiteLLM auto-instrumentation
+spans.py — Context managers for OpenTelemetry distributed tracing spans
+  task_span (function) — 20-30 — Span context manager for individual task execution with identity attributes
+  run_span (function) — 34-38 — Span context manager for full haive run wrapping the CLI run loop

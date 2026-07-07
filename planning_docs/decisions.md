@@ -470,7 +470,7 @@ Format per entry:
 
 ---
 
-### Reviewer may request specific files beyond task scope
+### Reviewer may request specific files beyond task scope (superseded — see "Shared read_file tool replaces the reviewer's JSON-shape request protocol")
 
 **Decision:** `ReviewAgent` can respond with `{"action": "request_file", "path": "..."}` instead of a verdict when it needs to verify a claim not covered by the code it was shown, up to a token budget shared across the whole review (reusing `_REVIEW_CONTEXT_BUDGET`, not a separate arbitrary request count). It stays on `ModelClient.call()` (plain text), not the agentic `call_single()`/tools protocol `CodeDiscoveryAgent` uses.
 
@@ -479,6 +479,20 @@ Format per entry:
 **Rationale:** The reviewer's context (`loaded_sections`) is scoped by the task's own description, not by what's needed to *verify* a claim about behavior elsewhere in the codebase — this caused a real failure where the reviewer couldn't confirm whether a callback ever receives certain data, because the file that would prove it was never in scope. A lightweight JSON request/response protocol avoids rewriting the reviewer's existing model-escalation tests (which mock `.call()` directly) and avoids introducing a second calling convention into the class.
 
 **Tradeoff:** The reviewer can only request files it can already name from something visible in front of it (an import, a call site) — it cannot browse the repo from scratch the way `CodeDiscoveryAgent` can. This fixes "confirm a lead I already have," not "find the answer when nothing in view points anywhere." If that proves insufficient, the next step is giving it the same navigation tools discovery uses — deliberately deferred to keep this change small.
+
+**Superseded:** The tradeoffs accepted above (avoid rewriting model-escalation tests, avoid a second calling convention) turned out to cost more than they saved. `TaskExecutor`'s code-editing call site needed the identical capability — a code editor explicitly said "I only have the run function in context... please provide the full contents" but had no schema-legitimate way to ask, since `min_length=1` (added separately to stop empty submissions) closed off the only escape valve. Building this twice, plus discovering a *third* independent hand-rolled version in `AgentMdGenerationAgent`, confirmed the "avoid a second calling convention" tradeoff was backwards — the JSON-shape convention *was* the second, less reliable one. See the new decision below for what replaced it.
+
+---
+
+### Shared read_file tool replaces the reviewer's JSON-shape request protocol
+
+**Decision:** `ReviewAgent` and `TaskExecutor` both use one shared `read_file` tool + tool-calling loop (`haive/execution/read_file_tool.py`), built on `ModelClient.call_single()`/real tool-calling — the same mechanism `CodeDiscoveryAgent` already used successfully. `ContextRequest` and the JSON-shape-sniffing it required are retired entirely.
+
+**Alternatives:** Generalize the existing JSON-shape convention into a shared helper both agents call, without switching to real tool-calling; give `TaskExecutor` its own separate ad-hoc mechanism rather than sharing one with the reviewer.
+
+**Rationale:** Real tool-calling removes an entire class of failure this session kept hitting — a model choosing the wrong JSON shape, or producing malformed output under an ambiguous convention (the same failure mode showed up as the empty-edit bug, the orchestrator JSON-extraction failures, and the reviewer's own request-parsing). The provider's own tool-calling API resolves "is this a tool call or a final answer?" unambiguously; no more guessing is needed. Sharing one implementation between both consumers (and designing it so `AgentMdGenerationAgent` could adopt it later) also removes duplicated path-safety and budget-truncation logic that had already been copied twice.
+
+**Tradeoff:** Both `ReviewAgent.review()` and `TaskExecutor._run_inner()` needed their core LLM-calling mechanism changed from a simple prompt/system string pair to a `messages` list threaded across retries/model-escalation — a larger, more invasive change than either individual fix would have been alone, and it required rewriting most of both files' existing tests. Accepted because doing it once, shared, is cheaper than the three-separate-implementations problem it replaces.
 
 ---
 

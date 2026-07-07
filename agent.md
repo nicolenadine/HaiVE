@@ -1,12 +1,13 @@
 ## Files
 
-CLAUDE.md — Working principles, design guidelines, and development discipline for agents and human contributors
-README.md — Quick start guide and repository requirements for haive multi-provider AI agent harness
-agents.yaml — Agent role definitions with descriptions, skills, prompts, schemas, and LLM configuration
-guidelines.md — Project coding standards for correctness, design, naming, testing, and security
-pyproject.toml — Project metadata, dependencies, and pytest configuration
-haive/ — CLI, adapters, discovery, execution, LLM, models, orchestration, persistence, and registry modules
-planning_docs/ — Architecture, design decisions, phased roadmap, token efficiency, and future enhancements
-prompts/ — System prompts and task templates for ten specialized AI agent roles
-schemas/ — JSON schema files for agent outputs, review verdicts, and data validation
-scripts/ — Smoke test for GitHub adapter integration and live project validation
+CLAUDE.md — Working principles, guidelines, and best practices for code generation and PR discipline
+README.md — Haive overview, quick start, and repository indexing requirements
+agents.yaml — Configuration registry for 10 specialized AI agents with system prompts and schemas
+guidelines.md — Project-wide coding standards for correctness, design, naming, testing, and security
+pyproject.toml — Python project metadata, dependencies, and pytest configuration
+haive/ — Multi-provider AI agent harness with CLI, task orchestration, execution, and GitHub integration
+planning_docs/ — Architecture documentation, design decisions, roadmap, and specifications
+prompts/ — System prompts for specialized agents covering implementation, review, testing, and refactoring
+schemas/ — JSON output schemas for agent code generation and review verdict outputs
+scripts/ — Live integration test for GitHub project management adapter
+tests/ — Comprehensive test suite for CLI, orchestration, adapters, and agent execution workflows

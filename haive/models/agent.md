@@ -1,46 +1,41 @@
 ## Files
 
-__init__.py — Package initialization for haive models
-agent_output.py — Output schemas for various agent types (scaffold, code editor, reviewers, test generator, documentation writer)
-  FileToCreate (class) — 8-12 — Model for specifying new files to create
-  ScaffoldAgentOutput (class) — 15-19 — Output from scaffold agent containing files and notes
-  FileEdit (class) — 24-28 — Model for editing existing files with complete content
-  CodeEditorOutput (class) — 31-35 — Output from code editor agents with file edits and notes
-  ReviewFinding (class) — 40-47 — Finding from review agents with file, line, severity, and suggestions
-  ReviewAgentOutput (class) — 50-80 — Structured review verdict with passed/uncertain/infeasible states and findings
-  TestGeneratorOutput (class) — 85-89 — Output from test generator with test file edits
-  DocumentationWriterOutput (class) — 94-98 — Output from documentation writer with file edits
-config.py — Application configuration settings and agent configuration models
-  _CsvDotEnvSource (class) — 12-24 — Custom DotEnv source supporting comma-separated list values
-  Settings (class) — 27-113 — Global application configuration with LLM tiers, adapter selection, and credentials
-  load_settings (function) — 116-124 — Load settings from environment and config file with error handling
-  AgentConfig (class) — 127-138 — Per-agent configuration with role, prompts, tokens, and skills
-context_request.py — Context request model for reviewer file read requests
-  ContextRequest (class) — 8-17 — Model for reviewer requesting file context before rendering verdict
-discovery.py — Repository discovery models for loading relevant source sections
-  DiscoveredSection (class) — 8-14 — Metadata for a discovered repo section with file path and line range
-  DiscoveryResult (class) — 17-19 — Result containing discovered sections and status
-  LoadedSection (class) — 22-25 — Loaded source content for a discovered section with reason
-enums.py — Task status, agent role, and complexity enumerations
-  TaskStatus (class) — 4-11 — Enum of task lifecycle states (pending, in_progress, complete, blocked, skipped)
-  AgentRole (class) — 14-24 — Enum of agent roles (scaffold, implementation, refactoring, reviewers, etc.)
-  Complexity (class) — 27-30 — Enum of task complexity levels (low, medium, high)
+__init__.py — Package initialization for Haive data models
+agent_output.py — Output schemas for scaffold, code editor, review, and test generator agents
+  FileToCreate (class) — 8-12 — Represents a file to create with path and content
+  ScaffoldAgentOutput (class) — 15-19 — Scaffold agent output with files to create and notes
+  FileEdit (class) — 24-28 — Represents a file to edit with complete new content
+  CodeEditorOutput (class) — 31-35 — Code editor output with file edits and reviewer notes
+  ReviewFinding (class) — 40-47 — Individual finding from review with file, line, severity and message
+  ReviewAgentOutput (class) — 50-80 — Review verdict with passed/uncertain/infeasible flags and findings
+  TestGeneratorOutput (class) — 85-89 — Test generator output for writing or updating test files
+  DocumentationWriterOutput (class) — 94-98 — Documentation writer output for documentation files
+config.py — Runtime settings and agent configuration models
+  Settings (class) — 27-113 — Application settings for models, tiers, providers, and GitHub adapters
+  AgentConfig (class) — 127-138 — Configuration for individual agents with role, skills, and constraints
+discovery.py — Models for code discovery and section loading
+  DiscoveredSection (class) — 8-14 — Discovered code section with file, symbol, and line ranges
+  DiscoveryResult (class) — 17-19 — Result of discovery with sections list and status
+  LoadedSection (class) — 22-25 — Loaded source code section with content and reason
+enums.py — Task, agent, and complexity enumerations
+  TaskStatus (class) — 4-11 — Task lifecycle states from pending to skipped
+  AgentRole (class) — 14-24 — Roles for agents including scaffold, implementation, and review
+  Complexity (class) — 27-30 — Task complexity levels: low, medium, high
 orchestrator.py — Orchestrator input/output models for task coordination
-  OrchestratorTaskView (class) — 9-22 — Read-only task view for orchestrator with status and verdict
-  OrchestratorInput (class) — 25-32 — Input to orchestrator containing project, tasks, and comments
-  NewTask (class) — 35-45 — Task specification for orchestrator to create with dependencies and criteria
+  OrchestratorTaskView (class) — 9-22 — Task view for orchestrator with status and verdict info
+  OrchestratorInput (class) — 25-32 — Orchestrator input with project, tasks, and comments
+  NewTask (class) — 35-45 — New task specification with role, complexity, and criteria
   OrchestratorOutput (class) — 48-58 — Orchestrator output with new tasks and completion flag
-review.py — Review verdict model bridging agent output and execution state
-  ReviewVerdict (class) — 8-31 — Review verdict with passed/uncertain/infeasible states and suggestions
-state.py — Project state persistence model with task execution records
-  ProjectState (class) — 10-28 — Serializable project state snapshot with schema version and task records
-task.py — Task, project, and execution record domain models
-  Project (class) — 8-12 — Container for project metadata and branch information
-  Task (class) — 15-25 — Individual task with role, complexity, dependencies, and acceptance criteria
-  TaskComment (class) — 28-32 — Comment on a task with author and timestamp
-  AttemptLogEntry (class) — 35-38 — Log entry tracking attempt tier and reason
-  VerdictSummary (class) — 41-44 — Stored verdict summary with passed status and reason
-  TokenUsage (class) — 47-50 — Token usage metrics for LLM calls
-  TaskExecutionRecord (class) — 53-67 — Complete execution record with verdict, attempts, model, and metrics
-verdict.py — Review verdict model (duplicate/legacy definition)
-  ReviewVerdict (class) — 4-8 — Review verdict with passed and uncertain flags
+review.py — Review verdict model for code review outcomes
+  ReviewVerdict (class) — 8-31 — Review verdict with passed flag, reason, and suggestions
+state.py — Project state model for persisting task execution records
+  ProjectState (class) — 10-28 — Project state snapshot with schema version and task records
+task.py — Core task, project, and execution models
+  Project (class) — 10-14 — Project metadata with ID, title, description, and branch
+  Task (class) — 17-27 — Task definition with ID, role, complexity, and acceptance criteria
+  TaskComment (class) — 30-34 — Comment on a task with author, body, and timestamp
+  AttemptLogEntry (class) — 37-54 — Attempt log with tier, attempt number, and bounded reason
+  VerdictSummary (class) — 57-60 — Verdict summary with passed flag and reason
+  TokenUsage (class) — 63-66 — Token usage metrics for API calls
+  TaskExecutionRecord (class) — 69-83 — Execution record with verdict, attempts, files, and timing
+verdict.py — Simplified review verdict model for verdicts

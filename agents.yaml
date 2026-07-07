@@ -101,7 +101,7 @@ code_reviewer_agent:
   output_schema: "schemas/review_verdict.json"
   max_tokens: 4096
   retry_limit: 1
-  prompt_version: "1.0"
+  prompt_version: "1.1"
 
 security_reviewer_agent:
   description: "Reviews code for security vulnerabilities, unsafe patterns, and exposure of sensitive data."

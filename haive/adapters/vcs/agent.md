@@ -1,8 +1,8 @@
 ## Files
 
-base.py — VCSAdapter protocol defining common version control operations interface
-  VCSAdapter (class) — 4-15 — Protocol for VCS implementations with branch, PR, and commit methods
-github.py — GitHub-specific VCS adapter implementation using PyGithub and GraphQL
-  GitHubVCSAdapter (class) — 14-164 — Concrete adapter for GitHub PR and branch operations
-  _graphql (method) — 28-42 — Executes GitHub GraphQL queries with authorization
-__init__.py — Package exports for VCS adapters
+__init__.py — Package initialization for VCS adapters
+base.py — VCSAdapter protocol defining version control interface
+  VCSAdapter (class) — 4-15 — Protocol for VCS operations including branch, PR, and merge management
+github.py — GitHub implementation of VCS adapter using PyGithub and GraphQL
+  GitHubVCSAdapter (class) — 14-164 — Concrete GitHub adapter for branch management, PR creation, and merging
+  _graphql (method) — 28-42 — Execute GraphQL queries against GitHub API with error handling

@@ -11,6 +11,7 @@ from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
 from haive.discovery.file_index_service import FileIndexService
 from haive.execution.context_assembler import ContextAssembler
 from haive.execution.output_validator import OutputValidationError, OutputValidator
+from haive.execution.read_file_tool import run_tool_loop
 from haive.execution.review_agent import ReviewAgent
 from haive.llm.errors import APIError
 from haive.llm.model_client import ModelClient
@@ -29,6 +30,13 @@ _SCAFFOLD_ROLES: frozenset[AgentRole] = frozenset({AgentRole.SCAFFOLD_AGENT})
 _MAX_API_ERRORS = 3
 _MIN_LINES_FOR_SHRINKAGE_CHECK = 20
 _MAX_ALLOWED_SHRINKAGE = 0.5
+
+# An order of magnitude smaller than the reviewer's own budget/round limit:
+# discovery now forces full-file loading for non-scaffold tasks, so this is a
+# rarely-firing escape hatch for a referenced file discovery didn't select,
+# not a primary way to load context.
+_EDITOR_CONTEXT_BUDGET = 8_000
+_EDITOR_MAX_CONTEXT_ROUNDS = 4
 
 
 def _utcnow() -> datetime:
@@ -150,10 +158,16 @@ class TaskExecutor:
                         retry_feedback=retry_feedback or None,
                     )
 
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": context},
+                    ]
+
                     self._on_status(f"  [#{task.task_id}] LLM call  [attempt={attempt_num + 1}, tier={complexity.value}]")
                     try:
-                        response = self._model_client.call(
-                            tier, context, system_prompt, agent_config.max_tokens
+                        result = run_tool_loop(
+                            self._model_client, tier, messages, agent_config.max_tokens,
+                            self._root, _EDITOR_CONTEXT_BUDGET, _EDITOR_MAX_CONTEXT_ROUNDS,
                         )
                         consecutive_api_errors = 0
                     except APIError as exc:
@@ -173,7 +187,7 @@ class TaskExecutor:
                     attempt_num += 1
 
                     try:
-                        agent_output = self._validator.validate(response.content, task.agent_role)
+                        agent_output = self._validator.validate(result.content, task.agent_role)
                     except OutputValidationError as exc:
                         self._on_status(f"  [#{task.task_id}] schema validation failed — retrying")
                         record.attempt_log.append(
@@ -199,7 +213,7 @@ class TaskExecutor:
                         retry_feedback = [shrinkage_reason]
                         continue
 
-                    self._on_status(f"  [#{task.task_id}] reviewing output  [{response.model_used}]")
+                    self._on_status(f"  [#{task.task_id}] reviewing output  [{result.model_used}]")
                     verdict = self._review_agent.review(
                         task=task,
                         agent_output=agent_output,
@@ -219,7 +233,7 @@ class TaskExecutor:
                             task_branch=task_branch,
                             attempt_num=attempt_num,
                             complexity=complexity,
-                            response_model=response.model_used,
+                            response_model=result.model_used,
                             prompt_version=agent_config.prompt_version,
                             file_index=file_index,
                             pm=pm,

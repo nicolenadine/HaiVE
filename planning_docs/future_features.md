@@ -109,6 +109,19 @@ which is what's been exercised so far.
 
 ---
 
+## Migrate AgentMdGenerationAgent onto the shared read_file tool
+
+`ReviewAgent` and `TaskExecutor` both now use `haive/execution/read_file_tool.py`'s shared
+`read_file` tool + `run_tool_loop`, replacing two previously-separate hand-rolled mechanisms.
+While building that, a third, independent implementation was found in
+`haive/discovery/agent_md_generation_agent.py` (`AgentMdGenerationAgent`) — its own duplicated
+`read_file` tool schema, its own copy of `resolve_within_root`, and its own copy of
+`_assistant_message`. Migrating it onto the shared module would remove the last duplicate, but
+its exit semantics differ (it returns generated markdown text, not a verdict/edit), so it wasn't
+in scope here. Revisit once there's a concrete reason to touch that agent again.
+
+---
+
 ## GitHub Native Issue Relationships
 
 `haive_depends_on` is currently a text custom field (comma-separated issue numbers) because
