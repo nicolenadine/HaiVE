@@ -773,6 +773,9 @@ def _run_milestone(
             )
             return MilestoneRunOutcome.WAVE_LIMIT_REACHED
 
+    except FileNotFoundError as e:
+        typer.secho(f"Error: agents.yaml not found at '{agents}' ({e}).", fg="red", err=True)
+        raise typer.Exit(code=1)
     except (RuntimeError, APIError) as e:
         typer.secho(f"Error: {e}", fg="red", err=True)
         raise typer.Exit(code=1)

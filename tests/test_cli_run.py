@@ -109,7 +109,10 @@ def _base_mocks() -> dict:
     )
 
 
-def _apply_common_patches(stack: ExitStack, m: dict, root: str, agent_md_exists: bool) -> None:
+def _apply_common_patches(
+    stack: ExitStack, m: dict, root: str, agent_md_exists: bool,
+    registry_load_error: Exception | None = None,
+) -> None:
     """Shared mock patching for both 'run' and 'run-all' invocations.
 
     All haive imports inside _run_milestone are local, so we patch them at
@@ -139,7 +142,10 @@ def _apply_common_patches(stack: ExitStack, m: dict, root: str, agent_md_exists:
     stack.enter_context(patch("pathlib.Path.rglob", side_effect=lambda *a, **k: iter(agent_mds)))
     stack.enter_context(patch("pathlib.Path.read_text", return_value="system prompt"))
 
-    reg_cls.load.return_value = m["registry"]
+    if registry_load_error is not None:
+        reg_cls.load.side_effect = registry_load_error
+    else:
+        reg_cls.load.return_value = m["registry"]
     tc_cls.from_settings.return_value = m["tier_config"]
 
 
@@ -149,11 +155,12 @@ def _run_with_mocks(
     root: str = "/fake/root",
     agent_md_exists: bool = True,
     catch_exceptions: bool = False,
+    registry_load_error: Exception | None = None,
 ) -> object:
     """Invoke 'haive run --project 42' with all heavy dependencies mocked."""
     args = ["run", "--project", "42"] + (extra_args or [])
     with ExitStack() as stack:
-        _apply_common_patches(stack, m, root, agent_md_exists)
+        _apply_common_patches(stack, m, root, agent_md_exists, registry_load_error)
         return runner.invoke(app, args, catch_exceptions=catch_exceptions)
 
 
@@ -186,6 +193,16 @@ class TestRunPreflightAgentMd:
         m = _base_mocks()
         result = _run_with_mocks(m, agent_md_exists=True)
         assert result.exit_code == 0
+
+
+class TestRunMissingAgentsYaml:
+    def test_missing_agents_yaml_reports_clean_error_not_traceback(self):
+        m = _base_mocks()
+        result = _run_with_mocks(
+            m, registry_load_error=FileNotFoundError(2, "No such file or directory", "agents.yaml")
+        )
+        assert result.exit_code == 1
+        assert "agents.yaml not found" in result.output.lower()
 
 
 class TestRunLineRangeResync:
