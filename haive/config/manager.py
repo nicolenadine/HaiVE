@@ -8,6 +8,30 @@ from pathlib import Path
 _VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 _VALID_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
+_TEMPLATE = """\
+# Required — see README.md "Required token permissions"
+GITHUB_TOKEN=
+GITHUB_REPO=
+GITHUB_PROJECT_ID=
+
+# Optional
+GITHUB_MILESTONE_ID=
+
+# One of these two is required, matching whichever provider your
+# tier/reviewer models use (see agents.yaml)
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+
+# Defaults shown below; uncomment a line to override.
+# OLLAMA_API_BASE=http://localhost:11434
+# MAX_WAVES_PER_RUN=2
+# MAX_MILESTONES_PER_RUN=3
+# MAX_RECOVERY_DEPTH=3
+# MAX_EXECUTORS=4
+# OBSERVABILITY_ENABLED=false
+# PHOENIX_OTLP_ENDPOINT=http://localhost:6006/v1/traces
+"""
+
 
 class ConfigManager:
     _HAIVE_DIR = Path.home() / ".haive"
@@ -38,7 +62,7 @@ class ConfigManager:
     def _bootstrap_default(cls) -> None:
         default = cls._CONFIGS_DIR / "default.env"
         if not default.exists():
-            default.touch()
+            default.write_text(_TEMPLATE)
         cls._ACTIVE_FILE.write_text("default")
 
     @classmethod
@@ -60,7 +84,7 @@ class ConfigManager:
         path = cls._CONFIGS_DIR / f"{name}.env"
         if path.exists():
             raise FileExistsError(f"Config '{name}' already exists: {path}")
-        path.touch()
+        path.write_text(_TEMPLATE)
 
     @classmethod
     def use(cls, name: str) -> None:
@@ -128,7 +152,7 @@ class ConfigManager:
 
     @classmethod
     def edit(cls) -> None:
-        editor = os.environ.get("EDITOR", "nano")
+        editor = os.environ.get("EDITOR", "vim")
         try:
             subprocess.run([*shlex.split(editor), cls.active_config_path()], check=True)
         except subprocess.CalledProcessError as e:

@@ -83,7 +83,7 @@ def config_set(
 
 @config_app.command("edit")
 def config_edit() -> None:
-    """Open the active config in $EDITOR (falls back to nano)."""
+    """Open the active config in $EDITOR (falls back to vim)."""
     ConfigManager.edit()
 
 
