@@ -110,7 +110,30 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 
 Model tiers (`TIER_LOW_MODELS`, `TIER_MEDIUM_MODELS`, `TIER_HIGH_MODELS`, `REVIEWER_MODELS`) and their attempt counts/context budgets have working defaults spanning Anthropic and OpenAI models; override them the same way if you want a different mix or a single provider. Each value is a comma-separated list of LiteLLM-style model identifiers (e.g. `anthropic/claude-sonnet-4-6,openai/gpt-4o`) — the first is primary, the rest are fallbacks.
 
-Per-agent-role behavior (system prompts, output schemas, max tokens, retry limits) is configured separately in `agents.yaml`, not through `haive config`. haive ships its own bundled agent registry — no per-project setup required — so `haive run`/`haive run-all` work against any target project out of the box. Pass `--agents PATH` (and, for planning examples, `--examples PATH`) to override with a fully custom registry if a project needs different agent behavior.
+Per-agent-role behavior (system prompts, output schemas, max tokens, retry limits) is configured separately in `agents.yaml`, not through `haive config`. haive ships its own bundled agent registry — no per-project setup required — so `haive run`/`haive run-all` work against any target project out of the box.
+
+### Using a fully custom agent registry
+
+Pass `--agents PATH` (and, for planning examples, `--examples PATH`) to override haive's bundled defaults with your own, if a project needs different agent behavior — different system prompts, tone, constraints, or tuning per role:
+
+```
+haive run --project 12 --agents ./my-agents.yaml --examples ./my-examples.yaml
+```
+
+A custom `agents.yaml` must define all ten agent roles (`scaffold_agent`, `implementation_agent`, `code_editor_agent`, `refactoring_agent`, `api_integration_agent`, `database_agent`, `test_generator_agent`, `code_reviewer_agent`, `security_reviewer_agent`, `documentation_writer_agent`) — haive's own [haive/resources/agents.yaml](haive/resources/agents.yaml) is a working reference to copy and adapt. Each role needs:
+
+| Field | Purpose |
+|---|---|
+| `description` | Short summary of the role, shown to the orchestrator when planning tasks. |
+| `skills` | List of at least one capability, also shown to the orchestrator. |
+| `system_prompt` | Path to a markdown file with the role's actual instructions — **resolved relative to your custom `agents.yaml`'s own directory**, not the target project. |
+| `output_schema` | Non-empty label for the role's expected output shape (not yet validated against a real file). |
+| `max_tokens` | Token budget for this role's generations. |
+| `retry_limit` | How many retries before escalating/falling back. |
+| `prompt_version` | Free-form version string for your own tracking. |
+| `context_budget_multiplier` | Optional float (default `1.0`) to scale this role's context budget. |
+
+`--examples` points to an orchestrator example-library YAML (see [haive/orchestration/examples.yaml](haive/orchestration/examples.yaml) for the format) used to guide planning; it's optional — if the path doesn't exist, haive logs a note and runs without it rather than failing.
 
 ## Repository requirements
 
