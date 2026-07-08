@@ -10,22 +10,48 @@ Before running haive, create and configure a named config:
 haive config create myproject
 haive config set GITHUB_TOKEN <your-token>
 haive config set GITHUB_REPO owner/repo
-haive config set GITHUB_PROJECT_ID <project-id>
 ```
 
-Then run haive against a GitHub Project:
+Then set up haive's GitHub Project board — this creates (or reuses) a Projects v2 board, adds the custom fields haive needs, and writes `GITHUB_PROJECT_ID` into your active config automatically:
 
 ```
-haive run
+haive project setup
 ```
 
-`GITHUB_PROJECT_ID` is the human-readable project number shown in the GitHub Projects URL (e.g., `github.com/orgs/myorg/projects/7` → `7`). You can override it for a one-off run without changing your config:
+Then run haive against a milestone on that project:
 
 ```
-haive run --project <id>
+haive run --project <milestone-number>
 ```
 
 Re-run after addressing any `needs-human-review` issues to continue the next wave of tasks.
+
+### Required token permissions
+
+`GITHUB_TOKEN` needs a classic personal access token with the `repo` and `project` scopes. If the repository is owned by an organization, the token may also need `read:org`, and the organization may need to approve the PAT before it can access org resources.
+
+### Manual board setup
+
+If you'd rather configure the board by hand, or already have one you want to reuse across repos, skip `haive project setup` and set `GITHUB_PROJECT_ID` directly:
+
+```
+haive config set GITHUB_PROJECT_ID <project-id>
+```
+
+`GITHUB_PROJECT_ID` is the human-readable project number shown in the GitHub Projects URL (e.g., `github.com/orgs/myorg/projects/7` → `7`).
+
+A manually-configured board must have these custom fields, with these exact names and types:
+
+| Field | Type | Options |
+|---|---|---|
+| `haive_agent_role` | single select | `scaffold_agent`, `implementation_agent`, `code_editor_agent`, `refactoring_agent`, `api_integration_agent`, `database_agent`, `test_generator_agent`, `code_reviewer_agent`, `security_reviewer_agent`, `documentation_writer_agent` |
+| `haive_complexity` | single select | `low`, `medium`, `high` |
+| `haive_depends_on` | text | — |
+| `haive_lineage_depth` | number | — |
+| `haive_recovery_for` | text | — |
+| `haive_acceptance_criteria` | text | — |
+
+The board's built-in `Status` field also needs its options set to: `pending`, `in_progress`, `complete`, `needs_human_review`, `awaiting_merge`, `blocked`, `skipped`.
 
 ## Repository requirements
 

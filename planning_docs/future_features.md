@@ -27,25 +27,6 @@ Example output:
 
 ---
 
-### `haive project setup` — Project Setup Wizard
-Interactive wizard that automates the one-time GitHub setup required before
-running haive on a new repo. Walks the user through:
-
-1. Creating a GitHub Projects v2 board (or linking an existing one)
-2. Adding all required custom fields with the correct types and option values:
-   - `haive_agent_role` (single select — all 10 `AgentRole` values)
-   - `haive_complexity` (single select — `low`, `medium`, `high`)
-   - `haive_lineage_depth` (number)
-   - `haive_recovery_for` (text)
-   - `haive_acceptance_criteria` (text)
-3. Configuring the Status field with haive's expected values
-4. Writing `GITHUB_PROJECT_ID` to the active haive config automatically
-
-Goal: eliminate the current manual setup step entirely so a new user can go
-from zero to a configured project board in a single command.
-
----
-
 ## Token-Efficient Agent Output (Partial File Edits)
 
 Agent output schemas currently require returning complete file content for every file edited

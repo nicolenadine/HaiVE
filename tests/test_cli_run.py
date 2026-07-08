@@ -451,3 +451,86 @@ class TestPruneBranches:
         assert result.exit_code == 0
         assert "aborted" in result.output.lower()
         m["vcs"].delete_branch.assert_not_called()
+
+
+class TestProjectSetup:
+    def _run_setup(self, mock_settings, mock_result, extra_args: list[str] | None = None) -> object:
+        args = ["project", "setup"] + (extra_args or [])
+        with ExitStack() as stack:
+            stack.enter_context(patch("haive.cli._check_git_on_path"))
+            stack.enter_context(patch("haive.cli._check_active_config"))
+            stack.enter_context(patch("haive.models.config.load_settings", return_value=mock_settings))
+            mock_setup = stack.enter_context(
+                patch("haive.adapters.pm.board_setup.setup_board", return_value=mock_result)
+            )
+            mock_set_value = stack.enter_context(patch("haive.config.manager.ConfigManager.set_value"))
+            result = runner.invoke(app, args)
+            return result, mock_setup, mock_set_value
+
+    def _mock_settings(self, **overrides):
+        settings = MagicMock()
+        settings.github_token = overrides.get("github_token", "ghp_test")
+        settings.github_repo = overrides.get("github_repo", "owner/repo")
+        return settings
+
+    def _mock_result(self, **overrides) -> object:
+        from haive.adapters.pm.board_setup import BoardSetupResult
+        defaults = dict(
+            project_number=7, project_url="https://github.com/orgs/owner/projects/7",
+            created_project=True, fields_created=["haive_agent_role"],
+            fields_already_existing=[], status_updated=True,
+            verified=True, verification_issues=[],
+        )
+        return BoardSetupResult(**(defaults | overrides))
+
+    def test_success_writes_project_id_to_config(self):
+        result, mock_setup, mock_set_value = self._run_setup(self._mock_settings(), self._mock_result())
+
+        assert result.exit_code == 0
+        mock_setup.assert_called_once_with("ghp_test", "owner", "repo", "repo Haive")
+        mock_set_value.assert_called_once_with("GITHUB_PROJECT_ID", "7")
+        assert "GITHUB_PROJECT_ID set to 7" in result.output
+
+    def test_custom_title_passed_through(self):
+        result, mock_setup, _ = self._run_setup(
+            self._mock_settings(), self._mock_result(), extra_args=["--title", "My Board"]
+        )
+        assert result.exit_code == 0
+        mock_setup.assert_called_once_with("ghp_test", "owner", "repo", "My Board")
+
+    def test_verification_failure_does_not_write_config_and_exits_nonzero(self):
+        failing_result = self._mock_result(verified=False, verification_issues=["missing field: haive_complexity"])
+        result, _, mock_set_value = self._run_setup(self._mock_settings(), failing_result)
+
+        assert result.exit_code == 1
+        mock_set_value.assert_not_called()
+        assert "missing field: haive_complexity" in result.output
+
+    def test_missing_token_or_repo_exits_before_calling_setup(self):
+        result, mock_setup, _ = self._run_setup(
+            self._mock_settings(github_token=None), self._mock_result()
+        )
+        assert result.exit_code == 1
+        mock_setup.assert_not_called()
+
+    def test_malformed_repo_exits_before_calling_setup(self):
+        result, mock_setup, _ = self._run_setup(
+            self._mock_settings(github_repo="not-a-valid-repo"), self._mock_result()
+        )
+        assert result.exit_code == 1
+        mock_setup.assert_not_called()
+
+    def test_runtime_error_from_setup_board_fails_gracefully(self):
+        with ExitStack() as stack:
+            stack.enter_context(patch("haive.cli._check_git_on_path"))
+            stack.enter_context(patch("haive.cli._check_active_config"))
+            stack.enter_context(patch("haive.models.config.load_settings", return_value=self._mock_settings()))
+            stack.enter_context(
+                patch("haive.adapters.pm.board_setup.setup_board", side_effect=RuntimeError("token lacks scope"))
+            )
+            mock_set_value = stack.enter_context(patch("haive.config.manager.ConfigManager.set_value"))
+            result = runner.invoke(app, ["project", "setup"])
+
+        assert result.exit_code == 1
+        assert "token lacks scope" in result.output
+        mock_set_value.assert_not_called()

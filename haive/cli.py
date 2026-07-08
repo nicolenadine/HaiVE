@@ -11,6 +11,8 @@ from haive.config.manager import ConfigManager
 app = typer.Typer(help="Haive — AI agent harness for software development.")
 config_app = typer.Typer(help="Manage named configs.")
 app.add_typer(config_app, name="config")
+project_app = typer.Typer(help="Manage the GitHub Project board haive coordinates through.")
+app.add_typer(project_app, name="project")
 
 
 # ── Config subcommands ────────────────────────────────────────────────────────
@@ -95,6 +97,77 @@ def config_delete(name: str = typer.Argument(..., help="Name of the config to de
     except (FileNotFoundError, ValueError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
+
+
+# ── Project subcommands ───────────────────────────────────────────────────────
+
+@project_app.command("setup")
+def project_setup(
+    title: str = typer.Option(
+        None, "--title", help='Project title (default: "<repo> Haive").',
+    ),
+) -> None:
+    """Create or configure a Haive-compatible GitHub Project v2 board.
+
+    Uses GITHUB_TOKEN/GITHUB_REPO from the active config. Idempotent — safe
+    to re-run against an already-configured board. On success, writes the
+    board's project number to GITHUB_PROJECT_ID in the active config.
+    """
+    _preflight_checks()
+
+    from haive.adapters.pm.board_setup import setup_board
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    if not settings.github_token or not settings.github_repo:
+        typer.echo(
+            "Error: GITHUB_TOKEN and GITHUB_REPO must be set in the active config first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if "/" not in settings.github_repo:
+        typer.echo(
+            f"Error: GITHUB_REPO must be in 'owner/repo' format, got: {settings.github_repo!r}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    owner, repo = settings.github_repo.split("/", 1)
+    board_title = title or f"{repo} Haive"
+
+    try:
+        result = setup_board(settings.github_token, owner, repo, board_title)
+    except RuntimeError as e:
+        typer.secho(f"Error: {e}", fg="red", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"{'Created' if result.created_project else 'Reusing existing'} project "
+        f"#{result.project_number}: {result.project_url}"
+    )
+    if result.fields_created:
+        typer.echo(f"Created field(s): {', '.join(result.fields_created)}")
+    if result.fields_already_existing:
+        typer.echo(f"Field(s) already present: {', '.join(result.fields_already_existing)}")
+    typer.echo(
+        "Status options updated to match haive's TaskStatus values."
+        if result.status_updated
+        else "Status options already correct."
+    )
+
+    if not result.verified:
+        typer.secho("Verification failed:", fg="red", err=True)
+        for issue in result.verification_issues:
+            typer.secho(f"  - {issue}", fg="red", err=True)
+        raise typer.Exit(code=1)
+
+    ConfigManager.set_value("GITHUB_PROJECT_ID", str(result.project_number))
+    typer.echo(f"Verified. GITHUB_PROJECT_ID set to {result.project_number} in the active config.")
 
 
 # ── Preflight checks ──────────────────────────────────────────────────────────
