@@ -8,7 +8,15 @@ from pydantic import ValidationError
 
 from haive.config.manager import ConfigManager
 
-app = typer.Typer(help="Haive — AI agent harness for software development.")
+app = typer.Typer(
+    help=(
+        "Haive — a multi-provider AI agent harness that coordinates specialized "
+        "sub-agents through GitHub Issues and Projects to complete software "
+        "development tasks, with a full review-and-retry loop before merging.\n\n"
+        "First time? Run 'haive config create <name>', set GITHUB_TOKEN/GITHUB_REPO, "
+        "then 'haive project setup' before 'haive run'. See README.md for details."
+    )
+)
 config_app = typer.Typer(help="Manage named configs.")
 app.add_typer(config_app, name="config")
 project_app = typer.Typer(help="Manage the GitHub Project board haive coordinates through.")
@@ -246,7 +254,14 @@ def index(
         help="Validate existing agent.md files without regenerating them.",
     ),
 ) -> None:
-    """Generate (or validate) per-directory agent.md index files."""
+    """Generate (or validate) per-directory agent.md index files.
+
+    Required before 'haive run' — task agents navigate this index to find
+    relevant code instead of scanning the whole repo. Regenerates every
+    directory unconditionally (an LLM call each); 'haive run' itself keeps
+    the index incrementally up to date after each task, so you shouldn't
+    need to re-run this by hand except after manual edits outside haive.
+    """
     import os
 
     _preflight_checks()
@@ -301,7 +316,12 @@ def discover(
     budget: int = typer.Option(16000, "--budget", help="Token budget hint passed to the discovery agent."),
     verbose: bool = typer.Option(False, "--verbose", "-v", is_flag=True, help="Print raw LLM response before parsing."),
 ) -> None:
-    """Run the Code Discovery Agent against the current repo's agent.md tree."""
+    """Run the Code Discovery Agent standalone, without executing a task.
+
+    Useful for inspecting or debugging what context a given task description
+    would surface before actually running it — not part of the normal
+    'haive run' workflow, which does this internally per task.
+    """
     import os
     import types
 
@@ -367,7 +387,12 @@ def load(
     title: str = typer.Option("", "--title", help="Short task title (defaults to first 60 chars of description)."),
     budget: int = typer.Option(16000, "--budget", help="Token budget for section loading."),
 ) -> None:
-    """Discover relevant files and load their source content (discover + load pipeline)."""
+    """Discover relevant files and print their loaded source content.
+
+    Combines 'discover' with the same section-loading/budget logic 'haive run'
+    uses internally to assemble a task's context — useful for previewing
+    exactly what an agent would see, without executing anything.
+    """
     import os
     import types
 
@@ -472,9 +497,20 @@ def run(
 ) -> None:
     """Run the haive agent harness for a project milestone.
 
+    Each milestone gets its own dedicated branch (created on first run,
+    reused after). The orchestrator plans tasks against the milestone;
+    each task is executed with a discover → generate → review loop that
+    retries and escalates model tiers on failure, then its PR is created
+    and auto-merged into the milestone branch (unless --no-merge). Once
+    the orchestrator signals the milestone done, a final PR merges the
+    milestone branch into main — this one is never auto-merged, and is
+    always left for human review.
+
     Loops automatically across waves (planning, executing, replanning) up to
     settings.max_waves_per_run, stopping early when the project is done or
-    the orchestrator has no further automatic action to take.
+    the orchestrator has no further automatic action to take. Re-run to
+    continue past the wave limit or to pick up tasks left needing human
+    review.
     """
     import os
     from datetime import datetime, timezone
