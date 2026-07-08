@@ -1,9 +1,9 @@
 ## Files
 
 __init__.py — Package initialization for agent registry module
-agent_registry.py — AgentRegistry for loading and managing agent configurations from YAML
-  AgentRegistry (class) — 12-71 — Registry managing agent role configurations with validation and role lookup
-  load (method) — 17-51 — Loads and validates agent configurations from YAML file, ensuring all required roles present
-  get_agent (method) — 53-57 — Retrieves agent configuration by role
-  roles (method) — 59-60 — Returns list of registered agent roles
-  get_orchestrator_summary (method) — 65-71 — Generates summary of all agents and their skills
+agent_registry.py — Registry for loading and managing agent configurations by role
+  AgentRegistry (class) — 12-73 — Manages agent configurations indexed by role with YAML loading
+  load (method) — 17-53 — Loads and validates agent configurations from a YAML file
+  get_agent (method) — 55-59 — Retrieves the configuration for a specific agent role
+  roles (method) — 61-62 — Returns list of all registered agent roles
+  get_orchestrator_summary (method) — 67-73 — Generates a summary of all agent roles and skills

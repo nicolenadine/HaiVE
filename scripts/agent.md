@@ -1,5 +1,5 @@
 ## Files
 
-test_adapter_live.py — Live smoke test for GitHubPMAdapter with GitHub repo connectivity
-  main (function) — 29-88 — Runs three-step validation: adapter initialization, project fetch, and task enumeration
-  _make_settings (function) — 21-26 — Creates minimal settings object with required GitHub credentials and project ID
+test_adapter_live.py — Live smoke test harness for GitHubPMAdapter with CLI argument validation
+  main (function) — 29-88 — Orchestrates adapter startup, project fetch, and task retrieval tests
+  _make_settings (function) — 21-26 — Creates minimal settings namespace with GitHub credentials

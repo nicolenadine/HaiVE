@@ -1,14 +1,14 @@
 ## Files
 
-agent_md_spec.md — Exact format specification for `agent.md` index files, section headers, file entries, symbol sub-entries, and validation rules
-agent_model.md — Agent role definitions, responsibilities, system prompt templates, and roster of 10 specialized agents
-architecture_overview.md — Core system components, their data flows, lifecycle, adapters, service layer, and observable spans
-build_plan.md — Implementation roadmap in 24 steps across 11 phases, with dependencies, success criteria, and hardening backlog
-communication_protocol.md — Data handoff formats between orchestrator, executor, reviewer, adapters, and services across the full task lifecycle
-data_and_state_model.md — Pydantic schemas for tasks, verdicts, context packs, agent outputs, configuration, state files, and GitHub metadata
-decisions.md — Resolved design choices including tradeoffs, rationale, and superseded decisions (repo map, refactoring scope, discovery agents)
-future_features.md — Post-v1 improvements including CLI enhancements, token-efficient partial edits, and symbol-line correction for non-Python
-hardening_backlog.md — 10 known reliability gaps to address before integration testing (permissions, partial creation, field pagination, etc)
-model_routing_strategy.md — Tier definitions, complexity-to-tier mapping, retry/escalation flow, LiteLLM configuration, and `.env` reference
-project_overview.md — Project goals, non-goals, core concepts, design principles, success criteria, and initial brief from stakeholder
-token_efficiency_strategy.md — Context budgets per tier, priority-ordered section allocation, code context inclusion rules, and orchestrator compression
+agent_md_spec.md — Format specification for per-directory agent.md index files, validator behavior, and complete valid examples
+agent_model.md — Agent definitions, system prompt template, roster of 10 specialized agents, initial registry structure
+architecture_overview.md — System architecture, component interactions, data flows, task lifecycle, and configuration
+build_plan.md — 24-step phased implementation plan from foundation through CLI and integration testing
+communication_protocol.md — Inter-component handoff formats, data contracts, and reasoning traces across every system boundary
+data_and_state_model.md — Pydantic schemas for all domain objects, orchestrator I/O, agent outputs, and state persistence
+decisions.md — Design decisions log with rationale, alternatives, and tradeoffs for 30+ major choices
+future_features.md — Post-v1 improvements including token-efficient agent output and reviewer repo navigation
+hardening_backlog.md — 10 reliability issues deferred from implementation steps, with context and remediation guidance
+model_routing_strategy.md — Complexity-to-tier mapping, retry/escalation rules, and complete .env configuration reference
+project_overview.md — Project mission, core design principles, build phases, success criteria, and initial open questions
+token_efficiency_strategy.md — Context budgets per tier, priority allocation, code context rules, and orchestrator trimming logic

@@ -6,7 +6,7 @@ from haive.models.enums import AgentRole
 from haive.registry.agent_registry import AgentRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
-REGISTRY_PATH = ROOT / "agents.yaml"
+REGISTRY_PATH = ROOT / "haive" / "resources" / "agents.yaml"
 
 _VALID_AGENT_YAML = """\
 scaffold_agent:
@@ -33,6 +33,13 @@ class TestLoad:
             cfg = registry.get_agent(role)
             assert cfg.role == role
             assert cfg.description
+
+    def test_resolves_system_prompt_to_absolute_path(self):
+        registry = AgentRegistry.load(str(REGISTRY_PATH))
+        for role in AgentRole:
+            cfg = registry.get_agent(role)
+            assert Path(cfg.system_prompt).is_absolute()
+            assert Path(cfg.system_prompt).is_file()
 
     def test_missing_required_field_raises(self, tmp_path):
         path = tmp_path / "agents.yaml"
@@ -90,7 +97,7 @@ class TestOrchestratorSummary:
         registry_file.write_text(yaml_content)
         # Copy the real prompts dir so only scaffold_agent.md is missing
         import shutil
-        shutil.copytree(ROOT / "prompts", tmp_path / "prompts")
+        shutil.copytree(ROOT / "haive" / "resources" / "prompts", tmp_path / "prompts")
         (tmp_path / "prompts" / "scaffold_agent.md").unlink()
         with pytest.raises(RuntimeError, match="system_prompt file not found"):
             AgentRegistry.load(str(registry_file))

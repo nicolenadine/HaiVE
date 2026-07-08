@@ -120,7 +120,7 @@ class TaskExecutor:
         pm.update_status(task.task_id, TaskStatus.IN_PROGRESS)
 
         agent_config = registry.get_agent(task.agent_role)
-        system_prompt = Path(self._root, agent_config.system_prompt).read_text(encoding="utf-8")
+        system_prompt = Path(agent_config.system_prompt).read_text(encoding="utf-8")
         dependency_outputs = self._build_dependency_outputs(task, project_state)
         task_branch = f"haive/task-{task.task_id}"
 

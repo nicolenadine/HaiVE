@@ -117,13 +117,13 @@ def make_executor(
 
 def make_services(tmp_path):
     """Return a dict of all per-run service mocks."""
-    registry = MagicMock()
-    registry.get_agent.return_value = make_agent_config()
-
     # Write a minimal system prompt file the executor can read
     prompt_path = tmp_path / "prompts" / "implementation_agent.md"
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text("You are an implementation agent.")
+
+    registry = MagicMock()
+    registry.get_agent.return_value = make_agent_config(system_prompt=str(prompt_path))
 
     file_index = MagicMock()
     file_index.update_after_task.return_value = []
@@ -580,7 +580,7 @@ class TestDiscoveryStatus:
 
         svc["registry"].get_agent.return_value = make_agent_config(
             role=AgentRole.SCAFFOLD_AGENT,
-            system_prompt="prompts/implementation_agent.md",
+            system_prompt=str(tmp_path / "prompts" / "implementation_agent.md"),
         )
         executor._model_client.call_single.return_value = AgenticTurn(
             tool_calls=[],

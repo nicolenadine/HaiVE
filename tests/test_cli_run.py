@@ -9,11 +9,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from haive.cli import app
+from haive.cli import _DEFAULT_AGENTS_PATH, app
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.orchestrator import NewTask, OrchestratorOutput
 from haive.models.task import MilestoneSummary, Project, Task, TaskExecutionRecord, VerdictSummary
 from haive.orchestration.orchestrator import OrchestratorStalledError
+from haive.registry.agent_registry import AgentRegistry
 
 runner = CliRunner()
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -203,6 +204,19 @@ class TestRunMissingAgentsYaml:
         )
         assert result.exit_code == 1
         assert "agents.yaml not found" in result.output.lower()
+
+
+class TestBundledAgentsDefault:
+    def test_bundled_registry_loads_from_a_foreign_cwd(self, tmp_path, monkeypatch):
+        """haive's default --agents value must resolve and load correctly even
+        when invoked from a directory with no local agents.yaml of its own —
+        the exact scenario that crashed against a real external project."""
+        monkeypatch.chdir(tmp_path)
+        registry = AgentRegistry.load(_DEFAULT_AGENTS_PATH)
+        assert len(registry) == 10
+        for role in AgentRole:
+            cfg = registry.get_agent(role)
+            assert Path(cfg.system_prompt).is_file()
 
 
 class TestRunLineRangeResync:

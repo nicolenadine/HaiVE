@@ -24,5 +24,8 @@ dependencies = [
 [project.scripts]
 haive = "haive.cli:app"
 
+[tool.hatch.build.targets.wheel]
+packages = ["haive"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

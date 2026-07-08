@@ -41,14 +41,16 @@ class AgentRegistry:
             raise RuntimeError(f"Registry is missing required roles: {missing}")
 
         registry_dir = os.path.dirname(os.path.abspath(path))
+        resolved_agents: dict[AgentRole, AgentConfig] = {}
         for role, config in agents.items():
             prompt_path = os.path.join(registry_dir, config.system_prompt)
             if not os.path.isfile(prompt_path):
                 raise RuntimeError(
                     f"system_prompt file not found for '{role.value}': {prompt_path!r}"
                 )
+            resolved_agents[role] = config.model_copy(update={"system_prompt": prompt_path})
 
-        return cls(agents)
+        return cls(resolved_agents)
 
     def get_agent(self, role: AgentRole) -> AgentConfig:
         try:

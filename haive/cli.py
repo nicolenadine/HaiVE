@@ -3,11 +3,15 @@ import shutil
 import time
 from datetime import datetime, timezone
 from enum import Enum
+from importlib.resources import files as _resource_files
 
 import typer
 from pydantic import ValidationError
 
 from haive.config.manager import ConfigManager
+
+_DEFAULT_AGENTS_PATH = str(_resource_files("haive") / "resources" / "agents.yaml")
+_DEFAULT_EXAMPLES_PATH = str(_resource_files("haive") / "orchestration" / "examples.yaml")
 
 
 class MilestoneRunOutcome(str, Enum):
@@ -581,7 +585,7 @@ def _run_milestone(
 
         # Build executor components once — stable across every wave in this invocation.
         reviewer_config = registry.get_agent(AgentRole.CODE_REVIEWER_AGENT)
-        reviewer_system_prompt = Path(root, reviewer_config.system_prompt).read_text(encoding="utf-8")
+        reviewer_system_prompt = Path(reviewer_config.system_prompt).read_text(encoding="utf-8")
         guidelines_candidates = [Path(root, "GUIDELINES.md"), Path(root, "guidelines.md")]
         guidelines = next(
             (p.read_text(encoding="utf-8") for p in guidelines_candidates if p.exists()), ""
@@ -792,14 +796,14 @@ def run(
         help="GitHub milestone number to run. Overrides GITHUB_MILESTONE_ID in config.",
     ),
     agents: str = typer.Option(
-        "agents.yaml",
+        _DEFAULT_AGENTS_PATH,
         "--agents",
-        help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
+        help="Path to agents.yaml. Defaults to haive's bundled agent registry.",
     ),
     examples: str = typer.Option(
-        "haive/orchestration/examples.yaml",
+        _DEFAULT_EXAMPLES_PATH,
         "--examples",
-        help="Path to orchestrator examples YAML. Skipped gracefully if not found.",
+        help="Path to orchestrator examples YAML. Defaults to haive's bundled examples; skipped gracefully if not found.",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -849,14 +853,14 @@ def run(
 @app.command("run-all")
 def run_all(
     agents: str = typer.Option(
-        "agents.yaml",
+        _DEFAULT_AGENTS_PATH,
         "--agents",
-        help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
+        help="Path to agents.yaml. Defaults to haive's bundled agent registry.",
     ),
     examples: str = typer.Option(
-        "haive/orchestration/examples.yaml",
+        _DEFAULT_EXAMPLES_PATH,
         "--examples",
-        help="Path to orchestrator examples YAML. Skipped gracefully if not found.",
+        help="Path to orchestrator examples YAML. Defaults to haive's bundled examples; skipped gracefully if not found.",
     ),
     dry_run: bool = typer.Option(
         False,

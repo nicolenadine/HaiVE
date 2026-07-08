@@ -176,7 +176,7 @@ class TestSchemaFiles:
     def test_all_schema_files_exist(self):
         import json
         from pathlib import Path
-        schemas_dir = Path(__file__).parent.parent / "schemas"
+        schemas_dir = Path(__file__).parent.parent / "haive" / "resources" / "schemas"
         for role in AgentRole:
             schema_path = schemas_dir / f"{role.value}.json"
             assert schema_path.exists(), f"Missing schema file: {schema_path.name}"

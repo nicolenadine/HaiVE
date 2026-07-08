@@ -110,7 +110,7 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 
 Model tiers (`TIER_LOW_MODELS`, `TIER_MEDIUM_MODELS`, `TIER_HIGH_MODELS`, `REVIEWER_MODELS`) and their attempt counts/context budgets have working defaults spanning Anthropic and OpenAI models; override them the same way if you want a different mix or a single provider. Each value is a comma-separated list of LiteLLM-style model identifiers (e.g. `anthropic/claude-sonnet-4-6,openai/gpt-4o`) — the first is primary, the rest are fallbacks.
 
-Per-agent-role behavior (system prompts, output schemas, max tokens, retry limits) is configured separately in `agents.yaml` at the repo root, not through `haive config`.
+Per-agent-role behavior (system prompts, output schemas, max tokens, retry limits) is configured separately in `agents.yaml`, not through `haive config`. haive ships its own bundled agent registry — no per-project setup required — so `haive run`/`haive run-all` work against any target project out of the box. Pass `--agents PATH` (and, for planning examples, `--examples PATH`) to override with a fully custom registry if a project needs different agent behavior.
 
 ## Repository requirements
 
