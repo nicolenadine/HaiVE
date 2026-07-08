@@ -61,17 +61,35 @@ class TestGenerateAll:
         assert agent_md.exists()
         assert "## Files" in agent_md.read_text()
 
-    def test_no_agent_md_written_for_directory_with_no_source_files(
+    def test_empty_repo_gets_placeholder_root_agent_md_without_an_llm_call(
         self, service, mock_client, tmp_path
     ):
         empty = tmp_path / "empty"
         empty.mkdir()
 
-        service.generate_all(str(tmp_path))
+        indexed = service.generate_all(str(tmp_path))
 
-        assert not (tmp_path / "agent.md").exists()
+        assert indexed == 0
+        root_agent_md = tmp_path / "agent.md"
+        assert root_agent_md.exists()
+        assert "## Files" in root_agent_md.read_text()
         assert not (empty / "agent.md").exists()
         mock_client.call_single.assert_not_called()
+
+    def test_placeholder_agent_md_passes_validation(self, service, tmp_path):
+        service.generate_all(str(tmp_path))
+        violations = service.validate_all(str(tmp_path))
+        assert violations == {}
+
+    def test_generate_all_returns_count_of_directories_indexed(
+        self, service, mock_client, tmp_path
+    ):
+        (tmp_path / "task.py").write_text("class Task: pass")
+        mock_client.call_single.return_value = make_turn(VALID_AGENT_MD)
+
+        indexed = service.generate_all(str(tmp_path))
+
+        assert indexed == 1
 
     def test_retry_on_validation_failure_then_success(self, service, mock_client, tmp_path):
         (tmp_path / "task.py").write_text("class Task: pass")
@@ -184,12 +202,12 @@ class TestGenerateAll:
         user_msg = next(m for m in first_call_messages if m["role"] == "user")
         assert ".hidden.py" not in user_msg["content"]
 
-    def test_non_source_files_do_not_trigger_generation(self, service, mock_client, tmp_path):
+    def test_non_source_files_do_not_trigger_llm_generation(self, service, mock_client, tmp_path):
         (tmp_path / "output.log").write_text("log entry")
 
-        service.generate_all(str(tmp_path))
+        indexed = service.generate_all(str(tmp_path))
 
-        assert not (tmp_path / "agent.md").exists()
+        assert indexed == 0
         mock_client.call_single.assert_not_called()
 
     def test_written_content_passes_validator(self, service, mock_client, tmp_path):

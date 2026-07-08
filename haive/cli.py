@@ -285,6 +285,8 @@ def index(
     directory unconditionally (an LLM call each); 'haive run' itself keeps
     the index incrementally up to date after each task, so you shouldn't
     need to re-run this by hand except after manual edits outside haive.
+    A brand-new, genuinely empty repo gets a placeholder agent.md instead
+    (no LLM call) so its first (typically scaffolding) task can still run.
     """
     import os
 
@@ -323,12 +325,18 @@ def index(
     typer.echo(f"Indexing {root} ...")
     start = time.perf_counter()
     try:
-        service.generate_all(root)
+        indexed = service.generate_all(root)
     except AgentMdGenerationError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
     elapsed = time.perf_counter() - start
-    typer.echo(f"Done. agent.md files written in {elapsed:.1f}s.")
+    if indexed == 0:
+        typer.echo(
+            "No source files found — wrote a placeholder agent.md so "
+            f"'haive run' can bootstrap this project's first task. ({elapsed:.1f}s)"
+        )
+    else:
+        typer.echo(f"Done. {indexed} agent.md file(s) written in {elapsed:.1f}s.")
 
 
 # ── Discover command ──────────────────────────────────────────────────────────

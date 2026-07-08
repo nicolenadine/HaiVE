@@ -23,22 +23,39 @@ class AgentMdGenerationError(Exception):
     pass
 
 
+_EMPTY_PROJECT_AGENT_MD = (
+    "## Files\n\n"
+    "(none) — Empty project; no source files exist yet.\n"
+)
+
+
 class FileIndexService:
     def __init__(self, model_client: ModelClient, tier: Tier) -> None:
         self._agent = AgentMdGenerationAgent(model_client, tier)
         self._validator = AgentMdValidator()
 
-    def generate_all(self, root: str) -> None:
+    def generate_all(self, root: str) -> int:
         """Generate agent.md for every source directory under root, leaves first.
 
         Bottom-up order ensures child agent.md files exist before the parent
         is generated, so the parent agent can read them for accurate subdirectory
         descriptions rather than guessing from directory names alone.
+
+        Returns the number of directories actually indexed. If the repo has
+        no source files anywhere yet, writes a placeholder root agent.md
+        instead (no LLM call) — this lets a brand-new project's first
+        (typically scaffolding) task run under the same "at least one
+        agent.md exists" invariant everything else in haive relies on,
+        rather than requiring that check to be relaxed elsewhere.
         """
         patterns = self._load_gitignore_patterns(root)
         dirs = list(self._walk_source_dirs(root, patterns))
+        if not dirs:
+            Path(root, "agent.md").write_text(_EMPTY_PROJECT_AGENT_MD, encoding="utf-8")
+            return 0
         for dir_path, source_files, subdirs in reversed(dirs):
             self._generate_for_dir(dir_path, source_files, subdirs, root)
+        return len(dirs)
 
     def read_repo_map(
         self, root: str, token_budget: int = ORCHESTRATOR_REPO_MAP_TOKEN_BUDGET
