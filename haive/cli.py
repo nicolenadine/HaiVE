@@ -17,9 +17,13 @@ app = typer.Typer(
         "then 'haive project setup' before 'haive run'. See README.md for details."
     )
 )
-config_app = typer.Typer(help="Manage named configs.")
+config_app = typer.Typer(
+    help="Manage named configs. Run 'haive config --help' for subcommands (create, use, set, show, list, edit, delete)."
+)
 app.add_typer(config_app, name="config")
-project_app = typer.Typer(help="Manage the GitHub Project board haive coordinates through.")
+project_app = typer.Typer(
+    help="Manage the GitHub Project board haive coordinates through. Run 'haive project --help' for subcommands (setup)."
+)
 app.add_typer(project_app, name="project")
 
 
