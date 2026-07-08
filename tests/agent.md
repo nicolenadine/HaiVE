@@ -6,9 +6,9 @@ test_agent_md_validator.py — Validation rules for agent.md file format and con
   AgentMdValidator (class) — 3-8 — Pydantic validator for agent.md structure
 test_agent_registry.py — Agent registry loading and orchestrator configuration
 test_cli_run.py — CLI run command execution and orchestration workflow tests
-  TestRunPreflightAgentMd (class) — 155-165 — Validates agent.md existence before run
-  TestRunTaskCreation (class) — 232-270 — Task creation and dependency resolution in run loop
-  TestReconciliation (class) — 335-374 — Merged PR detection and status updates
+  TestRunPreflightAgentMd (class) — 153-163 — Validates agent.md existence before run
+  TestRunTaskCreation (class) — 251-289 — Task creation and dependency resolution in run loop
+  TestReconciliation (class) — 354-393 — Merged PR detection and status updates
 test_code_discovery_agent.py — Code discovery agent for locating relevant source files
   TestTargetedDiscovery (class) — 119-231 — LLM-guided file and symbol discovery
   TestGuardrailCutoff (class) — 238-266 — Tool call limit enforcement to prevent runaway
@@ -57,4 +57,4 @@ test_task_state_schemas.py — ProjectState and TaskExecutionRecord schema valid
   TestSchemaVersionMismatch (class) — 64-86 — Version validation with descriptive error messages
 test_vcs_adapter.py — GitHub VCS adapter for branch, PR, and merge operations
   TestCreateBranch (class) — 51-108 — Remote ref creation and local checkout coordination
-  TestMergePR (class) — 204-241 — Direct merge with GraphQL auto-merge fallback
+  TestMergePR (class) — 213-250 — Direct merge with GraphQL auto-merge fallback
