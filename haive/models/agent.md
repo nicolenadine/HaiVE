@@ -11,8 +11,9 @@ agent_output.py — Output schemas for scaffold, code editor, review, and test g
   TestGeneratorOutput (class) — 85-89 — Test generator output for writing or updating test files
   DocumentationWriterOutput (class) — 94-98 — Documentation writer output for documentation files
 config.py — Runtime settings and agent configuration models
-  Settings (class) — 27-113 — Application settings for models, tiers, providers, and GitHub adapters
-  AgentConfig (class) — 127-138 — Configuration for individual agents with role, skills, and constraints
+  Settings (class) — 27-114 — Application settings with tier-specific models, context budgets, and GitHub integration
+  load_settings (function) — 117-125 — Load Settings from environment variables and config file
+  AgentConfig (class) — 128-139 — Configuration for individual agents with role, skills, and constraints
 discovery.py — Models for code discovery and section loading
   DiscoveredSection (class) — 8-14 — Discovered code section with file, symbol, and line ranges
   DiscoveryResult (class) — 17-19 — Result of discovery with sections list and status
@@ -31,11 +32,12 @@ review.py — Review verdict model for code review outcomes
 state.py — Project state model for persisting task execution records
   ProjectState (class) — 10-28 — Project state snapshot with schema version and task records
 task.py — Core task, project, and execution models
-  Project (class) — 10-14 — Project metadata with ID, title, description, and branch
-  Task (class) — 17-27 — Task definition with ID, role, complexity, and acceptance criteria
-  TaskComment (class) — 30-34 — Comment on a task with author, body, and timestamp
-  AttemptLogEntry (class) — 37-54 — Attempt log with tier, attempt number, and bounded reason
-  VerdictSummary (class) — 57-60 — Verdict summary with passed flag and reason
-  TokenUsage (class) — 63-66 — Token usage metrics for API calls
-  TaskExecutionRecord (class) — 69-83 — Execution record with verdict, attempts, files, and timing
+  Project (class) — 10-15 — Project metadata with ID, title, description, and branch
+  MilestoneSummary (class) — 18-21 — Milestone summary with number, title, and optional due date
+  Task (class) — 24-34 — Task definition with ID, role, complexity, dependencies, and status
+  TaskComment (class) — 37-41 — Comment on a task with author, body, and timestamp
+  AttemptLogEntry (class) — 44-61 — Attempt log with tier, attempt number, and bounded reason
+  VerdictSummary (class) — 64-67 — Verdict summary with passed flag, reason, and infeasible flag
+  TokenUsage (class) — 70-73 — Token usage metrics for prompt, completion, and total tokens
+  TaskExecutionRecord (class) — 76-90 — Execution record with verdict, attempts, model, files, and timing
 verdict.py — Simplified review verdict model for verdicts

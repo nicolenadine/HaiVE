@@ -12,6 +12,13 @@ class Project(BaseModel):
     title:          str
     description:    str
     project_branch: str
+    checkpoint:     bool = True
+
+
+class MilestoneSummary(BaseModel):
+    number: int
+    title:  str
+    due_on: datetime | None = None
 
 
 class Task(BaseModel):

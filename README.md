@@ -71,6 +71,8 @@ A single `haive run` invocation loops across **waves**, up to `max_waves_per_run
 
 Re-running `haive run` against the same milestone picks up where it left off — reconciling any tasks that were manually merged since the last run, and continuing planning from the current task board state.
 
+`haive run-all` works through every open milestone in sequence instead of one at a time, so you don't have to re-invoke `haive run --project N` manually for each of a queue of milestones. Milestones are ordered by their GitHub `due_on` date — used purely as an ordering key, not a literal deadline; set it in the GitHub UI to control build order. Milestones without a `due_on` sort last, by milestone number. Each milestone defaults to *gated*: once done, its final PR is created but never auto-merged, and `run-all` stops there, reporting that it's waiting on a human to merge it. Adding a `#Checkpoint: false` line to a milestone's description opts it out of that gate — its final PR auto-merges and the queue continues immediately to the next milestone. `run-all` never runs in the background waiting for a merge; re-invoke it once you've merged a gated milestone's PR to continue from where it stopped.
+
 ## Commands
 
 | Command | Purpose |
@@ -79,6 +81,7 @@ Re-running `haive run` against the same milestone picks up where it left off —
 | `haive project setup` | Create or configure a Haive-compatible GitHub Project v2 board; writes `GITHUB_PROJECT_ID` back to the active config. |
 | `haive index [--validate]` | Generate (or validate) the per-directory `agent.md` index task agents use to navigate the repo. Required before `haive run`. |
 | `haive run [--project N] [--dry-run] [--no-merge] [--quiet]` | Run the harness against a milestone. See "How it works" above and `haive run --help` for all flags. |
+| `haive run-all [--dry-run] [--no-merge] [--quiet]` | Work through every open milestone in `due_on` order, stopping at the first one that's gated-and-done or not yet done. See "How it works" above. |
 | `haive prune-branches [--yes]` | List `haive/task-*` branches whose PRs have been merged, and delete them after confirmation. |
 | `haive discover <description>` | Standalone: preview what code context the discovery agent would surface for a task description, without running anything. |
 | `haive load <description>` | Standalone: preview the actual loaded source content for a task description (discover + load), as a task would see it. |
@@ -99,6 +102,7 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 | `OPENAI_API_KEY` | one of these two | — | Needed if any configured tier/reviewer model uses `openai/...`. |
 | `OLLAMA_API_BASE` | no | `http://localhost:11434` | Base URL for local Ollama models, if used. |
 | `MAX_WAVES_PER_RUN` | no | `2` | Caps how many plan/execute waves one `haive run` invocation will loop through automatically. |
+| `MAX_MILESTONES_PER_RUN` | no | `3` | Caps how many milestones one `haive run-all` invocation will advance through automatically. |
 | `MAX_RECOVERY_DEPTH` | no | `3` | Caps how many times the orchestrator can chain recovery tasks for the same failure lineage before escalating to a human. |
 | `MAX_EXECUTORS` | no | `4` | Max tasks executed concurrently within a wave (only independent tasks — dependency order is always respected). |
 | `OBSERVABILITY_ENABLED` | no | `false` | Enables OpenTelemetry tracing (with LiteLLM auto-instrumentation) for each run. |

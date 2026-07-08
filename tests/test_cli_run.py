@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from haive.cli import app
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.orchestrator import NewTask, OrchestratorOutput
-from haive.models.task import Project, Task, TaskExecutionRecord, VerdictSummary
+from haive.models.task import MilestoneSummary, Project, Task, TaskExecutionRecord, VerdictSummary
 from haive.orchestration.orchestrator import OrchestratorStalledError
 
 runner = CliRunner()
@@ -44,6 +44,10 @@ def make_new_task(**kwargs) -> NewTask:
     ) | kwargs))
 
 
+def make_milestone(**kwargs) -> MilestoneSummary:
+    return MilestoneSummary(**(dict(number=42, title="Milestone", due_on=None) | kwargs))
+
+
 def _mock_span_cm() -> MagicMock:
     cm = MagicMock()
     cm.__enter__ = MagicMock(return_value=MagicMock())
@@ -58,6 +62,7 @@ def _base_mocks() -> dict:
     # Single-wave by default so existing single-wave-focused tests are unaffected by
     # the run loop; multi-wave behavior is tested explicitly with its own settings.
     mock_settings.max_waves_per_run = 1
+    mock_settings.max_milestones_per_run = 3
 
     mock_pm = MagicMock()
     mock_pm.get_project.return_value = make_project()
@@ -104,6 +109,40 @@ def _base_mocks() -> dict:
     )
 
 
+def _apply_common_patches(stack: ExitStack, m: dict, root: str, agent_md_exists: bool) -> None:
+    """Shared mock patching for both 'run' and 'run-all' invocations.
+
+    All haive imports inside _run_milestone are local, so we patch them at
+    their source-module paths rather than haive.cli.X.
+    """
+    stack.enter_context(patch("haive.cli._check_git_on_path"))
+    stack.enter_context(patch("haive.cli._check_active_config"))
+    stack.enter_context(patch("haive.models.config.load_settings", return_value=m["settings"]))
+    stack.enter_context(patch("haive.adapters.pm.github.GitHubPMAdapter", return_value=m["pm"]))
+    stack.enter_context(patch("haive.adapters.vcs.github.GitHubVCSAdapter", return_value=m["vcs"]))
+    stack.enter_context(patch("haive.persistence.state_store.StateStore", return_value=m["state_store"]))
+    reg_cls = stack.enter_context(patch("haive.registry.agent_registry.AgentRegistry"))
+    tc_cls = stack.enter_context(patch("haive.llm.tier_config.TierConfig"))
+    stack.enter_context(patch("haive.llm.model_client.ModelClient"))
+    stack.enter_context(patch("haive.discovery.code_discovery_agent.CodeDiscoveryAgent"))
+    stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService", return_value=m["file_index"]))
+    stack.enter_context(patch("haive.orchestration.orchestrator.Orchestrator", return_value=m["orchestrator"]))
+    stack.enter_context(patch("haive.orchestration.task_scheduler.TaskScheduler", return_value=m["scheduler"]))
+    stack.enter_context(patch("haive.execution.review_agent.ReviewAgent"))
+    stack.enter_context(patch("haive.execution.task_executor.TaskExecutor"))
+    stack.enter_context(patch("haive.observability.setup.setup_observability"))
+    stack.enter_context(patch("haive.observability.spans.run_span", return_value=_mock_span_cm()))
+    stack.enter_context(patch("haive.orchestration.example_library.ExampleLibrary"))
+    stack.enter_context(patch("haive.orchestration.task_view_builder.TaskViewBuilder"))
+    stack.enter_context(patch("os.getcwd", return_value=root))
+    agent_mds = [Path("/fake/agent.md")] if agent_md_exists else []
+    stack.enter_context(patch("pathlib.Path.rglob", side_effect=lambda *a, **k: iter(agent_mds)))
+    stack.enter_context(patch("pathlib.Path.read_text", return_value="system prompt"))
+
+    reg_cls.load.return_value = m["registry"]
+    tc_cls.from_settings.return_value = m["tier_config"]
+
+
 def _run_with_mocks(
     m: dict,
     extra_args: list[str] | None = None,
@@ -111,40 +150,26 @@ def _run_with_mocks(
     agent_md_exists: bool = True,
     catch_exceptions: bool = False,
 ) -> object:
-    """Invoke 'haive run --project 42' with all heavy dependencies mocked.
-
-    All haive imports inside the run() function body are local, so we patch
-    them at their source-module paths rather than haive.cli.X.
-    """
+    """Invoke 'haive run --project 42' with all heavy dependencies mocked."""
     args = ["run", "--project", "42"] + (extra_args or [])
     with ExitStack() as stack:
-        stack.enter_context(patch("haive.cli._check_git_on_path"))
-        stack.enter_context(patch("haive.cli._check_active_config"))
-        stack.enter_context(patch("haive.models.config.load_settings", return_value=m["settings"]))
-        stack.enter_context(patch("haive.adapters.pm.github.GitHubPMAdapter", return_value=m["pm"]))
-        stack.enter_context(patch("haive.adapters.vcs.github.GitHubVCSAdapter", return_value=m["vcs"]))
-        stack.enter_context(patch("haive.persistence.state_store.StateStore", return_value=m["state_store"]))
-        reg_cls = stack.enter_context(patch("haive.registry.agent_registry.AgentRegistry"))
-        tc_cls = stack.enter_context(patch("haive.llm.tier_config.TierConfig"))
-        stack.enter_context(patch("haive.llm.model_client.ModelClient"))
-        stack.enter_context(patch("haive.discovery.code_discovery_agent.CodeDiscoveryAgent"))
-        stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService", return_value=m["file_index"]))
-        stack.enter_context(patch("haive.orchestration.orchestrator.Orchestrator", return_value=m["orchestrator"]))
-        stack.enter_context(patch("haive.orchestration.task_scheduler.TaskScheduler", return_value=m["scheduler"]))
-        stack.enter_context(patch("haive.execution.review_agent.ReviewAgent"))
-        stack.enter_context(patch("haive.execution.task_executor.TaskExecutor"))
-        stack.enter_context(patch("haive.observability.setup.setup_observability"))
-        stack.enter_context(patch("haive.observability.spans.run_span", return_value=_mock_span_cm()))
-        stack.enter_context(patch("haive.orchestration.example_library.ExampleLibrary"))
-        stack.enter_context(patch("haive.orchestration.task_view_builder.TaskViewBuilder"))
-        stack.enter_context(patch("os.getcwd", return_value=root))
-        agent_mds = [Path("/fake/agent.md")] if agent_md_exists else []
-        stack.enter_context(patch("pathlib.Path.rglob", return_value=iter(agent_mds)))
-        stack.enter_context(patch("pathlib.Path.read_text", return_value="system prompt"))
+        _apply_common_patches(stack, m, root, agent_md_exists)
+        return runner.invoke(app, args, catch_exceptions=catch_exceptions)
 
-        reg_cls.load.return_value = m["registry"]
-        tc_cls.from_settings.return_value = m["tier_config"]
 
+def _run_all_with_mocks(
+    m: dict,
+    milestones: list,
+    extra_args: list[str] | None = None,
+    root: str = "/fake/root",
+    agent_md_exists: bool = True,
+    catch_exceptions: bool = False,
+) -> object:
+    """Invoke 'haive run-all' with all heavy dependencies mocked."""
+    m["pm"].list_open_milestones.return_value = milestones
+    args = ["run-all"] + (extra_args or [])
+    with ExitStack() as stack:
+        _apply_common_patches(stack, m, root, agent_md_exists)
         return runner.invoke(app, args, catch_exceptions=catch_exceptions)
 
 
@@ -534,3 +559,130 @@ class TestProjectSetup:
         assert result.exit_code == 1
         assert "token lacks scope" in result.output
         mock_set_value.assert_not_called()
+
+
+class TestRunAll:
+    def test_no_open_milestones_reports_cleanly(self):
+        m = _base_mocks()
+        result = _run_all_with_mocks(m, milestones=[])
+        assert result.exit_code == 0
+        assert "no open milestones" in result.output.lower()
+
+    def test_processes_milestones_in_due_on_order_with_missing_last(self):
+        m = _base_mocks()
+        milestones = [
+            make_milestone(number=20, title="No date", due_on=None),
+            make_milestone(number=10, title="Later date", due_on=datetime(2026, 8, 1, tzinfo=timezone.utc)),
+            make_milestone(number=5, title="Earlier date", due_on=datetime(2026, 6, 1, tzinfo=timezone.utc)),
+        ]
+        # Every milestone resolves instantly as done+merged (nothing to merge),
+        # regardless of checkpoint, so the whole queue gets walked in order.
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = False
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid)
+
+        result = _run_all_with_mocks(m, milestones=milestones)
+
+        assert result.exit_code == 0
+        called_ids = [c.args[0] for c in m["pm"].get_project.call_args_list]
+        assert called_ids == ["5", "10", "20"]  # earlier due_on first, no-due_on last
+        assert "processed all 3 milestone(s)" in result.output.lower()
+
+    def test_stops_at_first_gated_done_milestone_without_touching_later_ones(self):
+        m = _base_mocks()
+        milestones = [
+            make_milestone(number=5, title="Gated one", due_on=None),
+            make_milestone(number=6, title="Never touched", due_on=None),
+        ]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = True  # something to merge -> real PR path
+        m["vcs"].create_project_pr.return_value = "77"
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=True)
+
+        result = _run_all_with_mocks(m, milestones=milestones)
+
+        assert result.exit_code == 0
+        called_ids = [c.args[0] for c in m["pm"].get_project.call_args_list]
+        assert called_ids == ["5"]  # milestone 6 never fetched/touched
+        assert "waiting on its final pr to be merged" in result.output.lower()
+        m["vcs"].merge_pr.assert_not_called()
+
+    def test_advances_through_consecutive_checkpoint_false_milestones(self):
+        m = _base_mocks()
+        milestones = [
+            make_milestone(number=5, due_on=None),
+            make_milestone(number=6, due_on=None),
+        ]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = True
+        m["vcs"].create_project_pr.return_value = "77"
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=False)
+
+        result = _run_all_with_mocks(m, milestones=milestones)
+
+        assert result.exit_code == 0
+        called_ids = [c.args[0] for c in m["pm"].get_project.call_args_list]
+        assert called_ids == ["5", "6"]
+        assert m["vcs"].merge_pr.call_count == 2
+        assert "processed all 2 milestone(s)" in result.output.lower()
+
+    def test_no_merge_overrides_checkpoint_false(self):
+        m = _base_mocks()
+        milestones = [make_milestone(number=5, due_on=None)]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = True
+        m["vcs"].create_project_pr.return_value = "77"
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=False)
+
+        result = _run_all_with_mocks(m, milestones=milestones, extra_args=["--no-merge"])
+
+        assert result.exit_code == 0
+        m["vcs"].merge_pr.assert_not_called()
+        assert "waiting on its final pr to be merged" in result.output.lower()
+
+    def test_final_merge_failure_falls_back_to_awaiting(self):
+        m = _base_mocks()
+        milestones = [make_milestone(number=5, due_on=None)]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = True
+        m["vcs"].create_project_pr.return_value = "77"
+        m["vcs"].merge_pr.side_effect = RuntimeError("merge blocked")
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=False)
+
+        result = _run_all_with_mocks(m, milestones=milestones)
+
+        assert result.exit_code == 0
+        assert "waiting on its final pr to be merged" in result.output.lower()
+
+    def test_respects_max_milestones_per_run_cap(self):
+        m = _base_mocks()
+        m["settings"].max_milestones_per_run = 1
+        milestones = [
+            make_milestone(number=5, due_on=None),
+            make_milestone(number=6, due_on=None),
+        ]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = False  # instant done+merged
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=False)
+
+        result = _run_all_with_mocks(m, milestones=milestones)
+
+        assert result.exit_code == 0
+        called_ids = [c.args[0] for c in m["pm"].get_project.call_args_list]
+        assert called_ids == ["5"]  # cap=1, second milestone never touched
+        assert "reached the automatic milestone limit" in result.output.lower()
+
+    def test_wave_limit_reached_stops_queue(self):
+        m = _base_mocks()
+        milestones = [
+            make_milestone(number=5, due_on=None),
+            make_milestone(number=6, due_on=None),
+        ]
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=False)
+
+        result = _run_all_with_mocks(m, milestones=milestones)
+
+        assert result.exit_code == 0
+        called_ids = [c.args[0] for c in m["pm"].get_project.call_args_list]
+        assert called_ids == ["5"]
+        assert "reached the automatic wave limit" in result.output.lower()

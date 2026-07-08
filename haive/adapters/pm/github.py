@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -9,7 +10,19 @@ from pydantic import BaseModel
 
 from haive.models.config import Settings
 from haive.models.enums import AgentRole, Complexity, TaskStatus
-from haive.models.task import Project, Task, TaskComment
+from haive.models.task import MilestoneSummary, Project, Task, TaskComment
+
+_CHECKPOINT_RE = re.compile(r"^#Checkpoint:\s*(true|false)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _parse_checkpoint(description: str) -> bool:
+    """Defaults to True (gated) when the marker is absent, so every existing
+    milestone stays safe without needing a retroactive edit.
+    """
+    match = _CHECKPOINT_RE.search(description)
+    if match is None:
+        return True
+    return match.group(1).lower() == "true"
 
 _REQUIRED_CUSTOM_FIELDS = frozenset({
     "haive_agent_role",
@@ -249,12 +262,20 @@ class GitHubPMAdapter:
 
     def get_project(self, project_id: str) -> Project:
         ms = self._repo_obj.get_milestone(int(project_id))
+        description = ms.description or ""
         return Project(
             project_id=project_id,
             title=ms.title,
-            description=ms.description or "",
+            description=description,
             project_branch=f"haive/project-{project_id}",
+            checkpoint=_parse_checkpoint(description),
         )
+
+    def list_open_milestones(self) -> list[MilestoneSummary]:
+        return [
+            MilestoneSummary(number=ms.number, title=ms.title, due_on=ms.due_on)
+            for ms in self._repo_obj.get_milestones(state="open")
+        ]
 
     def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
         """Project-board items belonging to this milestone, excluding closed issues.

@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
     # Autonomous run loop
     max_waves_per_run: int = 2
+    max_milestones_per_run: int = 3
 
     # Concurrency
     max_executors: int = 4

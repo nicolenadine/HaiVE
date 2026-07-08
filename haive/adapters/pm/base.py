@@ -2,11 +2,12 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from haive.models.enums import TaskStatus
-from haive.models.task import Project, Task, TaskComment
+from haive.models.task import MilestoneSummary, Project, Task, TaskComment
 
 
 class PMAdapter(Protocol):
     def get_project(self, project_id: str) -> Project: ...
+    def list_open_milestones(self) -> list[MilestoneSummary]: ...
     def get_tasks(self, project_id: str) -> list[Task]: ...
     def read_new_comments(self, project_id: str, since: datetime) -> list[TaskComment]: ...
     # Write methods — implemented in Step 6:

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from haive.adapters.pm.github import GitHubPMAdapter
+from haive.adapters.pm.github import GitHubPMAdapter, _parse_checkpoint
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 
 _FIELD_IDS: dict[str, str] = {
@@ -163,6 +163,90 @@ class TestGetProject:
 
         project = adapter.get_project("1")
         assert project.description == ""
+
+    def test_checkpoint_defaults_true_when_marker_absent(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        ms.title = "No marker"
+        ms.description = "#Milestone\nSome milestone with no checkpoint marker."
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        project = adapter.get_project("1")
+        assert project.checkpoint is True
+
+    def test_checkpoint_false_when_marker_present(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        ms.title = "Autonomous"
+        ms.description = "#Milestone\nAuto milestone.\n#Checkpoint: false\n"
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        project = adapter.get_project("1")
+        assert project.checkpoint is False
+
+    def test_checkpoint_true_when_marker_explicitly_true(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        ms.title = "Gated"
+        ms.description = "#Checkpoint: true\n"
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        project = adapter.get_project("1")
+        assert project.checkpoint is True
+
+
+# ---------------------------------------------------------------------------
+# TestParseCheckpoint
+# ---------------------------------------------------------------------------
+
+class TestParseCheckpoint:
+    def test_absent_defaults_true(self):
+        assert _parse_checkpoint("No marker here at all.") is True
+
+    def test_false_marker(self):
+        assert _parse_checkpoint("#Checkpoint: false") is False
+
+    def test_true_marker(self):
+        assert _parse_checkpoint("#Checkpoint: true") is True
+
+    def test_case_insensitive(self):
+        assert _parse_checkpoint("#checkpoint: FALSE") is False
+
+    def test_marker_amid_other_content(self):
+        description = "#Milestone\nTitle\n\n#Checkpoint: false\n\n#Scope\nDo the thing.\n"
+        assert _parse_checkpoint(description) is False
+
+    def test_malformed_marker_defaults_true(self):
+        assert _parse_checkpoint("#Checkpoint: maybe") is True
+
+    def test_empty_string_defaults_true(self):
+        assert _parse_checkpoint("") is True
+
+
+# ---------------------------------------------------------------------------
+# TestListOpenMilestones
+# ---------------------------------------------------------------------------
+
+class TestListOpenMilestones:
+    def test_returns_milestone_summaries(self):
+        adapter = _make_adapter()
+        ms1 = MagicMock(number=10, title="First", due_on=datetime(2026, 6, 1, tzinfo=timezone.utc))
+        ms2 = MagicMock(number=11, title="Second", due_on=None)
+        adapter._repo_obj.get_milestones.return_value = [ms1, ms2]
+
+        result = adapter.list_open_milestones()
+
+        adapter._repo_obj.get_milestones.assert_called_once_with(state="open")
+        assert [m.number for m in result] == [10, 11]
+        assert result[0].title == "First"
+        assert result[0].due_on == datetime(2026, 6, 1, tzinfo=timezone.utc)
+        assert result[1].due_on is None
+
+    def test_empty_when_no_open_milestones(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestones.return_value = []
+
+        assert adapter.list_open_milestones() == []
 
 
 # ---------------------------------------------------------------------------

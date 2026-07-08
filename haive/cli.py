@@ -2,11 +2,27 @@ import json
 import shutil
 import time
 from datetime import datetime, timezone
+from enum import Enum
 
 import typer
 from pydantic import ValidationError
 
 from haive.config.manager import ConfigManager
+
+
+class MilestoneRunOutcome(str, Enum):
+    """What happened at the end of one _run_milestone() call.
+
+    run() ignores this (it only ever processes one milestone and prints
+    everything it needs internally); run-all() uses it to decide whether to
+    advance to the next milestone in the queue or stop there.
+    """
+
+    DONE_MERGED = "done_merged"                # milestone done, final PR merged — safe to advance
+    DONE_AWAITING_MERGE = "done_awaiting_merge"  # milestone done, final PR open — gated, or auto-merge failed
+    WAVE_LIMIT_REACHED = "wave_limit_reached"    # not done, ran out of waves this invocation
+    STALLED = "stalled"                          # OrchestratorStalledError — no automatic action possible
+    DRY_RUN_PREVIEW = "dry_run_preview"          # --dry-run showed a preview; nothing was done
 
 app = typer.Typer(
     help=(
@@ -462,66 +478,31 @@ def load(
 
 # ── Run command ───────────────────────────────────────────────────────────────
 
-@app.command()
-def run(
-    project: str | None = typer.Option(
-        None,
-        "--project",
-        help="GitHub milestone number to run. Overrides GITHUB_MILESTONE_ID in config.",
-    ),
-    agents: str = typer.Option(
-        "agents.yaml",
-        "--agents",
-        help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
-    ),
-    examples: str = typer.Option(
-        "haive/orchestration/examples.yaml",
-        "--examples",
-        help="Path to orchestrator examples YAML. Skipped gracefully if not found.",
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        is_flag=True,
-        help="Print what would happen without writing files, creating PRs, or calling adapter write methods.",
-    ),
-    no_merge: bool = typer.Option(
-        False,
-        "--no-merge",
-        is_flag=True,
-        help="Create task PRs but do not auto-merge them. Leaves PRs open for human review.",
-    ),
-    quiet: bool = typer.Option(
-        False,
-        "--quiet",
-        "-q",
-        is_flag=True,
-        help="Suppress routine progress output. Outcomes and errors are still printed.",
-    ),
-) -> None:
-    """Run the haive agent harness for a project milestone.
+def _run_milestone(
+    milestone_id: str,
+    agents: str,
+    examples: str,
+    dry_run: bool,
+    no_merge: bool,
+    quiet: bool,
+    *,
+    auto_merge_final_pr: bool,
+    command_name: str = "haive run",
+    project_data=None,
+) -> MilestoneRunOutcome:
+    """Run the harness against a single milestone until it's done, stalls,
+    or runs out of waves for this invocation. Shared by both `run` (one
+    milestone, final PR never auto-merged) and `run-all` (a queue of
+    milestones, where auto_merge_final_pr is decided per-milestone by its
+    own #Checkpoint marker).
 
-    Each milestone gets its own dedicated branch (created on first run,
-    reused after). The orchestrator plans tasks against the milestone;
-    each task is executed with a discover → generate → review loop that
-    retries and escalates model tiers on failure, then its PR is created
-    and auto-merged into the milestone branch (unless --no-merge). Once
-    the orchestrator signals the milestone done, a final PR merges the
-    milestone branch into main — this one is never auto-merged, and is
-    always left for human review.
-
-    Loops automatically across waves (planning, executing, replanning) up to
-    settings.max_waves_per_run, stopping early when the project is done or
-    the orchestrator has no further automatic action to take. Re-run to
-    continue past the wave limit or to pick up tasks left needing human
-    review.
+    project_data lets a caller that already fetched the Project (run-all
+    does, to read .checkpoint before deciding auto_merge_final_pr) pass it
+    through instead of triggering a second, redundant fetch here.
     """
     import os
-    from datetime import datetime, timezone
     from pathlib import Path
 
-    _preflight_checks()
-    milestone_id = _resolve_milestone_id(project)
     root = os.getcwd()
 
     from haive.adapters.pm.github import GitHubPMAdapter
@@ -580,7 +561,8 @@ def run(
         # Every task branches off it and merges into it; only the final
         # "project complete" PR (see the done handling below) ever touches
         # main.
-        project_data = pm.get_project(milestone_id)
+        if project_data is None:
+            project_data = pm.get_project(milestone_id)
         project_branch = project_data.project_branch
         if not dry_run:
             vcs.ensure_branch(project_branch, "main")
@@ -660,7 +642,7 @@ def run(
                         typer.echo(f"[dry-run] {len(pending_tasks)} pending task(s) would be scheduled:")
                         for t in pending_tasks:
                             typer.echo(f"  - #{t.task_id}: {t.title}")
-                        return
+                        return MilestoneRunOutcome.DRY_RUN_PREVIEW
                     if not quiet:
                         typer.echo(f"Scheduling {len(pending_tasks)} pending task(s)...")
                 else:
@@ -684,27 +666,36 @@ def run(
                         output = orchestrator.run_loop(orch_input)
                     except OrchestratorStalledError as e:
                         typer.echo(f"\n{e} — waiting on human input.")
-                        return
+                        return MilestoneRunOutcome.STALLED
 
                     if dry_run:
                         _print_dry_run_output(project_data, output)
-                        return
+                        return MilestoneRunOutcome.DRY_RUN_PREVIEW
 
                     if output.done:
                         if vcs.branch_has_new_commits("main", project_branch):
-                            pr_url = vcs.create_project_pr(
+                            pr_id = vcs.create_project_pr(
                                 project_branch,
                                 "main",
                                 f"Project complete: {project_data.title}",
                                 "All tasks complete — merging project branch to main.",
                             )
-                            typer.echo(f"\nProject complete. PR created: {pr_url}")
+                            typer.echo(f"\nProject complete. PR created: {pr_id}")
+                            if auto_merge_final_pr:
+                                try:
+                                    vcs.merge_pr(pr_id)
+                                    typer.echo("Final PR merged automatically (milestone checkpoint disabled).")
+                                    return MilestoneRunOutcome.DONE_MERGED
+                                except RuntimeError as exc:
+                                    typer.echo(f"Automatic merge of the final PR failed: {exc}")
+                                    return MilestoneRunOutcome.DONE_AWAITING_MERGE
+                            return MilestoneRunOutcome.DONE_AWAITING_MERGE
                         else:
                             typer.echo(
                                 "\nProject complete. All changes were already merged into main "
                                 "— nothing further to merge."
                             )
-                        return
+                            return MilestoneRunOutcome.DONE_MERGED
 
                     # Create new tasks and resolve "new:N" dependency refs.
                     id_map: dict[str, str] = {}
@@ -778,8 +769,9 @@ def run(
 
             typer.echo(
                 f"\nReached the automatic wave limit ({settings.max_waves_per_run}) for this run. "
-                "Re-run 'haive run' to continue."
+                f"Re-run '{command_name}' to continue."
             )
+            return MilestoneRunOutcome.WAVE_LIMIT_REACHED
 
     except (RuntimeError, APIError) as e:
         typer.secho(f"Error: {e}", fg="red", err=True)
@@ -787,6 +779,171 @@ def run(
     except ValidationError as e:
         typer.secho(f"Validation error: {e}", fg="red", err=True)
         raise typer.Exit(code=1)
+
+
+@app.command()
+def run(
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help="GitHub milestone number to run. Overrides GITHUB_MILESTONE_ID in config.",
+    ),
+    agents: str = typer.Option(
+        "agents.yaml",
+        "--agents",
+        help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
+    ),
+    examples: str = typer.Option(
+        "haive/orchestration/examples.yaml",
+        "--examples",
+        help="Path to orchestrator examples YAML. Skipped gracefully if not found.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        is_flag=True,
+        help="Print what would happen without writing files, creating PRs, or calling adapter write methods.",
+    ),
+    no_merge: bool = typer.Option(
+        False,
+        "--no-merge",
+        is_flag=True,
+        help="Create task PRs but do not auto-merge them. Leaves PRs open for human review.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        is_flag=True,
+        help="Suppress routine progress output. Outcomes and errors are still printed.",
+    ),
+) -> None:
+    """Run the haive agent harness for a project milestone.
+
+    Each milestone gets its own dedicated branch (created on first run,
+    reused after). The orchestrator plans tasks against the milestone;
+    each task is executed with a discover → generate → review loop that
+    retries and escalates model tiers on failure, then its PR is created
+    and auto-merged into the milestone branch (unless --no-merge). Once
+    the orchestrator signals the milestone done, a final PR merges the
+    milestone branch into main — this one is never auto-merged, and is
+    always left for human review.
+
+    Loops automatically across waves (planning, executing, replanning) up to
+    settings.max_waves_per_run, stopping early when the project is done or
+    the orchestrator has no further automatic action to take. Re-run to
+    continue past the wave limit or to pick up tasks left needing human
+    review.
+    """
+    _preflight_checks()
+    milestone_id = _resolve_milestone_id(project)
+    _run_milestone(
+        milestone_id, agents, examples, dry_run, no_merge, quiet,
+        auto_merge_final_pr=False,
+    )
+
+
+@app.command("run-all")
+def run_all(
+    agents: str = typer.Option(
+        "agents.yaml",
+        "--agents",
+        help="Path to agents.yaml. Defaults to agents.yaml in the current directory.",
+    ),
+    examples: str = typer.Option(
+        "haive/orchestration/examples.yaml",
+        "--examples",
+        help="Path to orchestrator examples YAML. Skipped gracefully if not found.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        is_flag=True,
+        help="Print what would happen without writing files, creating PRs, or calling adapter write methods.",
+    ),
+    no_merge: bool = typer.Option(
+        False,
+        "--no-merge",
+        is_flag=True,
+        help="Never auto-merge, even a milestone marked '#Checkpoint: false'. Task PRs still open for review.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        is_flag=True,
+        help="Suppress routine progress output. Outcomes and errors are still printed.",
+    ),
+) -> None:
+    """Work through every open milestone in order, without re-invoking per milestone.
+
+    Milestones are ordered by their due_on date — used purely as an
+    ordering key, not a literal deadline; set it in GitHub to control
+    build order. Milestones without a due_on sort last, by milestone
+    number.
+
+    Each milestone defaults to gated: its final PR is created but never
+    auto-merged, and this command stops there, reporting that it's waiting
+    on a human to merge it. A milestone whose description contains
+    '#Checkpoint: false' opts out of that gate — its final PR auto-merges
+    and the queue continues immediately to the next milestone.
+
+    This never runs in the background waiting for a merge. Re-invoke it
+    once you've merged a gated milestone's PR to continue from there.
+    """
+    _preflight_checks()
+
+    from haive.adapters.pm.github import GitHubPMAdapter
+    from haive.models.config import load_settings
+
+    try:
+        settings = load_settings()
+    except Exception as e:
+        typer.echo(f"Error loading config: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    pm = GitHubPMAdapter(settings)
+    milestones = pm.list_open_milestones()
+    if not milestones:
+        typer.echo("No open milestones found.")
+        return
+
+    milestones.sort(key=lambda m: (m.due_on is None, m.due_on, m.number))
+
+    processed = 0
+    for milestone in milestones:
+        if processed >= settings.max_milestones_per_run:
+            typer.echo(
+                f"\nReached the automatic milestone limit ({settings.max_milestones_per_run}) "
+                "for this run. Re-run 'haive run-all' to continue."
+            )
+            return
+
+        project = pm.get_project(str(milestone.number))
+        typer.secho(f"\n=== Milestone #{milestone.number}: {milestone.title} ===", bold=True)
+
+        outcome = _run_milestone(
+            str(milestone.number), agents, examples, dry_run, no_merge, quiet,
+            auto_merge_final_pr=(not no_merge) and (not project.checkpoint),
+            command_name="haive run-all",
+            project_data=project,
+        )
+        processed += 1
+
+        if outcome == MilestoneRunOutcome.DONE_MERGED:
+            typer.echo(f"Milestone #{milestone.number} complete and merged — continuing to the next milestone.")
+            continue
+
+        if outcome == MilestoneRunOutcome.DONE_AWAITING_MERGE:
+            typer.echo(
+                f"\nMilestone #{milestone.number} is done and waiting on its final PR to be merged "
+                "before continuing. Re-run 'haive run-all' once it's merged."
+            )
+        # WAVE_LIMIT_REACHED, STALLED, and DRY_RUN_PREVIEW already printed
+        # their own message inside _run_milestone — nothing more to add here.
+        return
+
+    typer.echo(f"\nProcessed all {processed} milestone(s) in the queue.")
 
 
 # ── Prune-branches command ────────────────────────────────────────────────────
