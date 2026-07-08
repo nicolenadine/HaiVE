@@ -29,6 +29,15 @@ class TestCreate:
         assert "# MAX_WAVES_PER_RUN=2" in content
         assert "# OLLAMA_API_BASE=http://localhost:11434" in content
 
+    def test_github_milestone_id_is_commented_not_blank(self):
+        # No sensible default exists (haive run falls back to --project instead) —
+        # must not be left uncommented, since a blank value for this int|None
+        # field previously crashed Settings with a raw pydantic parsing error.
+        ConfigManager.create("myconfig")
+        content = (ConfigManager._CONFIGS_DIR / "myconfig.env").read_text()
+        assert "# GITHUB_MILESTONE_ID=" in content
+        assert "GITHUB_MILESTONE_ID=" not in content.splitlines()
+
     def test_set_value_fills_in_a_required_placeholder_in_place(self):
         ConfigManager.create("myconfig")
         ConfigManager.use("myconfig")

@@ -14,13 +14,14 @@ GITHUB_TOKEN=
 GITHUB_REPO=
 GITHUB_PROJECT_ID=
 
-# Optional
-GITHUB_MILESTONE_ID=
-
 # One of these two is required, matching whichever provider your
 # tier/reviewer models use (see agents.yaml)
 ANTHROPIC_API_KEY=
 OPENAI_API_KEY=
+
+# No default milestone; haive run requires --project unless set here.
+# Uncomment to set one and skip passing --project every time.
+# GITHUB_MILESTONE_ID=
 
 # Defaults shown below; uncomment a line to override.
 # OLLAMA_API_BASE=http://localhost:11434

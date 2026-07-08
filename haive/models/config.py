@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources.base import PydanticBaseSettingsSource
 from pydantic_settings.sources.providers.dotenv import DotEnvSettingsSource
@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     github_project_id: int | None = None      # Projects v2 board number — shared, set once
     github_milestone_id: int | None = None    # default milestone for haive run (optional; --project overrides)
+
+    @field_validator("github_project_id", "github_milestone_id", mode="before")
+    @classmethod
+    def _blank_string_means_unset(cls, v: Any) -> Any:
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     @model_validator(mode="after")
     def validate_github_credentials(self) -> "Settings":
