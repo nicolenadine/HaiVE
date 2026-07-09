@@ -164,3 +164,55 @@ class TestRunToolLoop:
         )
 
         assert result.remaining_budget < 1000
+
+    def test_prose_with_no_json_is_not_accepted_as_final_answer(self, mock_client, base_messages):
+        # Regression test: a model reasoning out loud without calling a tool
+        # ("here's my plan...") must not be handed straight to the validator
+        # as if it were the final answer — it's guaranteed to fail schema
+        # validation there, burning a whole separate attempt (fresh
+        # discovery, fresh conversation) for something recoverable within
+        # this same conversation.
+        mock_client.call_single.side_effect = [
+            _turn_with_content("Based on the code I've read, here's my plan: I'll use pathlib."),
+            _turn_with_content('{"passed": true}'),
+        ]
+
+        result = run_tool_loop(
+            mock_client, _TIER, base_messages, max_tokens=1024, root="/tmp", budget=1000, max_rounds=5,
+        )
+
+        assert result.content == '{"passed": true}'
+        assert mock_client.call_single.call_count == 2
+        second_call_messages = mock_client.call_single.call_args_list[1].kwargs["messages"]
+        assert "wasn't your final answer" in second_call_messages[-1]["content"]
+
+    def test_content_containing_a_brace_is_accepted_immediately(self, mock_client, base_messages):
+        # A response with any '{' is treated as a genuine answer attempt —
+        # real validation (and any retry it triggers) is OutputValidator's
+        # job, not run_tool_loop's.
+        mock_client.call_single.return_value = _turn_with_content("not quite json {")
+
+        result = run_tool_loop(
+            mock_client, _TIER, base_messages, max_tokens=1024, root="/tmp", budget=1000, max_rounds=5,
+        )
+
+        assert result.content == "not quite json {"
+        assert mock_client.call_single.call_count == 1
+
+    def test_repeated_prose_eventually_hits_round_limit(self, mock_client, base_messages):
+        # The nudge must still respect max_rounds — a model that never
+        # produces anything brace-like must not loop forever.
+        mock_client.call_single.side_effect = [
+            _turn_with_content("Thinking about approach one..."),
+            _turn_with_content("Thinking about approach two..."),
+            _turn_with_content('{"passed": true}'),
+        ]
+
+        result = run_tool_loop(
+            mock_client, _TIER, base_messages, max_tokens=1024, root="/tmp", budget=1000, max_rounds=2,
+        )
+
+        assert result.content == '{"passed": true}'
+        assert mock_client.call_single.call_count == 3
+        final_call_kwargs = mock_client.call_single.call_args_list[-1].kwargs
+        assert not final_call_kwargs.get("tools")

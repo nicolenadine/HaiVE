@@ -377,7 +377,11 @@ class TestRetry:
         svc = make_services(tmp_path)
 
         executor._model_client.call_single.side_effect = [
-            AgenticTurn(tool_calls=[], content="not json", model_used="test-model"),
+            # Contains a brace so run_tool_loop treats it as a genuine answer
+            # attempt (not "still reasoning out loud") — it's malformed JSON,
+            # which is OutputValidator's failure mode to catch, not
+            # run_tool_loop's.
+            AgenticTurn(tool_calls=[], content="{not valid json", model_used="test-model"),
             make_editor_turn(),
         ]
         executor._review_agent.review.return_value = make_passing_review()

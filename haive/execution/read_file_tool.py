@@ -66,6 +66,15 @@ def read_file_for_tool_call(path: str, root: str, remaining_budget: int) -> tupl
     return text, tokens
 
 
+def _looks_like_final_answer(content: str | None) -> bool:
+    """Cheap plausibility check, not full JSON validation — OutputValidator
+    already owns that. Just enough to tell "the model is still reasoning
+    out loud" (no brace anywhere) apart from "the model gave some form of
+    answer" (worth handing to the validator, whatever the outcome).
+    """
+    return content is not None and "{" in content
+
+
 def _assistant_message(turn: AgenticTurn) -> dict:
     msg: dict = {"role": "assistant", "content": turn.content}
     if turn.tool_calls:
@@ -117,10 +126,24 @@ def run_tool_loop(
             tier=tier, messages=messages, max_tokens=max_tokens, tools=[READ_FILE_TOOL],
         )
         if not turn.tool_calls:
-            return ToolLoopResult(
-                content=turn.content or "", model_used=turn.model_used,
-                messages=messages, remaining_budget=remaining,
-            )
+            if _looks_like_final_answer(turn.content):
+                return ToolLoopResult(
+                    content=turn.content or "", model_used=turn.model_used,
+                    messages=messages, remaining_budget=remaining,
+                )
+            # No tool call and no sign of the expected JSON answer — the
+            # model is still reasoning out loud (e.g. describing its plan)
+            # rather than actually done. Accepting this as final would hand
+            # plain prose straight to the validator, guaranteed to fail
+            # schema validation and burn a whole separate attempt (fresh
+            # discovery, fresh conversation) for something recoverable
+            # within this same conversation for the cost of one more turn.
+            messages.append(_assistant_message(turn))
+            messages.append({
+                "role": "user",
+                "content": "That wasn't your final answer — respond with only the JSON object described in your instructions, nothing else.",
+            })
+            continue
 
         messages.append(_assistant_message(turn))
         for tc in turn.tool_calls:
