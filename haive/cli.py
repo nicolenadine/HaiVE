@@ -697,6 +697,64 @@ def _run_milestone(
                 if reconciled:
                     tasks = pm.get_tasks(milestone_id)
 
+                # Reconcile superseded recovery ancestors: once a recovery task
+                # completes, every ancestor in its lineage chain (the original
+                # task, and any intermediate recovery attempts) is done for —
+                # nothing will ever mark them complete themselves, since the
+                # completed descendant is the one that actually did the work.
+                # Left open, they'd block the "every task complete" done check
+                # forever, and any other task that still depends_on one of
+                # them would never unblock either. Closing the ancestor and
+                # redirecting dependents to the completed descendant fixes
+                # both at once.
+                tasks_by_id = {t.task_id: t for t in tasks}
+                supersede_map: dict[str, str] = {}
+                for t in tasks:
+                    if t.status != TaskStatus.COMPLETE or not t.recovery_for:
+                        continue
+                    ancestor_id: str | None = t.recovery_for
+                    while ancestor_id is not None and ancestor_id not in supersede_map:
+                        ancestor = tasks_by_id.get(ancestor_id)
+                        if ancestor is None:
+                            break
+                        supersede_map[ancestor_id] = t.task_id
+                        ancestor_id = ancestor.recovery_for
+
+                reconciled = False
+                for ancestor_id, completed_id in supersede_map.items():
+                    try:
+                        pm.add_comment(
+                            ancestor_id,
+                            f"**haive:** superseded by #{completed_id}, which completed "
+                            "successfully. Closing this issue.",
+                        )
+                        pm.close_task(ancestor_id)
+                        typer.echo(f"  [#{ancestor_id}] superseded by #{completed_id} — closed.")
+                        reconciled = True
+                    except RuntimeError as exc:
+                        typer.echo(f"  [#{ancestor_id}] Could not close superseded task: {exc}")
+
+                if supersede_map:
+                    for other in tasks:
+                        if other.task_id in supersede_map or not other.depends_on:
+                            continue
+                        if not any(dep in supersede_map for dep in other.depends_on):
+                            continue
+                        redirected = [supersede_map.get(dep, dep) for dep in other.depends_on]
+                        deduped = list(dict.fromkeys(redirected))
+                        try:
+                            pm.set_dependency(other.task_id, deduped)
+                            typer.echo(
+                                f"  [#{other.task_id}] dependency redirected: "
+                                f"{other.depends_on} -> {deduped}."
+                            )
+                            reconciled = True
+                        except RuntimeError as exc:
+                            typer.echo(f"  [#{other.task_id}] Could not redirect dependency: {exc}")
+
+                if reconciled:
+                    tasks = pm.get_tasks(milestone_id)
+
                 since = state.last_run_at or state.created_at
                 new_comments = pm.read_new_comments(milestone_id, since)
 

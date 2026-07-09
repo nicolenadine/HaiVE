@@ -335,6 +335,34 @@ class TestCloseCompletedTasks:
 
 
 # ---------------------------------------------------------------------------
+# TestCloseTask
+# ---------------------------------------------------------------------------
+
+class TestCloseTask:
+    def test_closes_the_issue_regardless_of_status(self):
+        # close_task retires a task superseded by a recovery attempt — its
+        # haive Status stays whatever it was (e.g. needs_human_review), only
+        # the GitHub issue itself is closed.
+        adapter = _make_adapter()
+        issue = MagicMock()
+        adapter._repo_obj.get_issue.return_value = issue
+
+        adapter.close_task("24")
+
+        adapter._repo_obj.get_issue.assert_called_once_with(24)
+        issue.edit.assert_called_once_with(state="closed")
+
+    def test_github_exception_is_translated_to_runtime_error(self):
+        adapter = _make_adapter()
+        adapter._repo_obj.get_issue.return_value.edit.side_effect = (
+            github.GithubException(401, {"message": "Bad credentials"}, None)
+        )
+
+        with pytest.raises(RuntimeError, match="Bad credentials"):
+            adapter.close_task("24")
+
+
+# ---------------------------------------------------------------------------
 # TestGetTasks
 # ---------------------------------------------------------------------------
 

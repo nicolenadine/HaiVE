@@ -535,6 +535,59 @@ class TestReconciliation:
         m["pm"].update_status.assert_any_call("5", TaskStatus.COMPLETE)
         assert m["pm"].get_tasks.call_count == 3
 
+    def test_closes_superseded_ancestor_and_comments_why(self):
+        # A recovery task's ancestor never reaches COMPLETE itself — nothing
+        # should be left open to block the "every task complete" done check.
+        m = _base_mocks()
+        ancestor = make_task(task_id="24", status=TaskStatus.NEEDS_HUMAN_REVIEW)
+        completed = make_task(task_id="31", status=TaskStatus.COMPLETE, recovery_for="24")
+        m["pm"].get_tasks.return_value = [ancestor, completed]
+
+        _run_with_mocks(m)
+
+        m["pm"].close_task.assert_called_once_with("24")
+        m["pm"].add_comment.assert_called_once()
+        commented_task_id, comment_body = m["pm"].add_comment.call_args.args
+        assert commented_task_id == "24"
+        assert "#31" in comment_body
+
+    def test_redirects_dependent_task_to_completed_descendant(self):
+        # A task depending on the superseded ancestor's task_id would
+        # otherwise wait forever for a task_id that can never complete.
+        m = _base_mocks()
+        ancestor = make_task(task_id="24", status=TaskStatus.NEEDS_HUMAN_REVIEW)
+        completed = make_task(task_id="31", status=TaskStatus.COMPLETE, recovery_for="24")
+        dependent = make_task(task_id="25", status=TaskStatus.PENDING, depends_on=["23", "24"])
+        m["pm"].get_tasks.return_value = [ancestor, completed, dependent]
+
+        _run_with_mocks(m)
+
+        m["pm"].set_dependency.assert_called_once_with("25", ["23", "31"])
+
+    def test_closes_full_chain_of_intermediate_recovery_ancestors(self):
+        # Two recovery generations (original -> intermediate -> completed):
+        # both the original and the intermediate attempt are superseded.
+        m = _base_mocks()
+        original = make_task(task_id="24", status=TaskStatus.NEEDS_HUMAN_REVIEW)
+        intermediate = make_task(task_id="30", status=TaskStatus.NEEDS_HUMAN_REVIEW, recovery_for="24")
+        completed = make_task(task_id="31", status=TaskStatus.COMPLETE, recovery_for="30")
+        m["pm"].get_tasks.return_value = [original, intermediate, completed]
+
+        _run_with_mocks(m)
+
+        closed_ids = {c.args[0] for c in m["pm"].close_task.call_args_list}
+        assert closed_ids == {"24", "30"}
+
+    def test_no_recovery_completion_leaves_tasks_untouched(self):
+        m = _base_mocks()
+        plain = make_task(task_id="1", status=TaskStatus.PENDING)
+        m["pm"].get_tasks.return_value = [plain]
+
+        _run_with_mocks(m)
+
+        m["pm"].close_task.assert_not_called()
+        m["pm"].set_dependency.assert_not_called()
+
     def test_leaves_unmerged_pr_untouched(self):
         m = _base_mocks()
         awaiting_task = make_task(task_id="5", status=TaskStatus.AWAITING_MERGE)

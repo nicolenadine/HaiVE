@@ -330,6 +330,23 @@ class GitHubPMAdapter:
         except github.GithubException as exc:
             raise RuntimeError(f"Could not close completed tasks for milestone #{project_id}: {exc}") from exc
 
+    def close_task(self, task_id: str) -> None:
+        """Close a single GitHub issue directly, regardless of its haive Status.
+
+        Used to retire a task superseded by a later recovery attempt:
+        closing it removes it from _project_items_for_milestone()'s results,
+        so it stops appearing in get_tasks() and can no longer block a
+        milestone's "every task complete" done check or strand a dependent
+        task waiting on a task_id that will never reach COMPLETE.
+
+        Raises plain RuntimeError (not github.GithubException) on failure —
+        see close_milestone()'s docstring.
+        """
+        try:
+            self._repo_obj.get_issue(int(task_id)).edit(state="closed")
+        except github.GithubException as exc:
+            raise RuntimeError(f"Could not close task #{task_id}: {exc}") from exc
+
     def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
         """Project-board items belonging to this milestone.
 
