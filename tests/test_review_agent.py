@@ -121,6 +121,24 @@ class TestModelEscalation:
         verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
         assert verdict.uncertain is False
 
+    def test_all_models_fail_schema_validation_returns_fallback_with_raw_excerpt(self):
+        # Regression test: when every reviewer model's response fails to parse
+        # (e.g. truncated mid-JSON because the response ran past the token
+        # budget), the fallback verdict must preserve an excerpt of the raw
+        # output — otherwise a real submission's fate here is a total black
+        # box, with no way to tell afterward whether the code was actually
+        # fine and only the reviewer's own output generation failed.
+        client = MagicMock(spec=ModelClient)
+        truncated = '{"passed": false, "findings": [{"file": "a.py", "line": 1, "severity": "major", "message": "cut off mid'
+        client.call_single.side_effect = [
+            AgenticTurn(tool_calls=[], content=truncated, model_used=m) for m in REVIEWER_MODELS
+        ]
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        assert verdict.passed is False
+        assert "Reviewer failed to produce a valid output after all model attempts" in verdict.reason
+        assert truncated[:50] in verdict.reason
+        assert verdict.suggestions == ["Manual review required."]
+
     def test_infeasible_does_not_advance_to_next_model(self):
         client = MagicMock(spec=ModelClient)
         infeasible_payload = {

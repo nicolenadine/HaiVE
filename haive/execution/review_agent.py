@@ -22,7 +22,13 @@ REVIEWER_MODELS = [
     "claude-opus-4-8",
 ]
 
-_REVIEW_MAX_TOKENS = 2048
+# A review addressing several acceptance criteria with detailed findings
+# (file, line, severity, message, suggestion per finding) can easily run past
+# a couple thousand tokens — 2048 was found too tight in practice, causing
+# the response to cut off mid-JSON and fail validation identically across
+# every model in REVIEWER_MODELS, not just an occasional one. Matches the
+# same class of fix already applied to test_generator_agent's max_tokens.
+_REVIEW_MAX_TOKENS = 4096
 _REVIEW_CONTEXT_BUDGET = 32_000
 
 # Safety valve against non-progressing loops (e.g. repeatedly requesting an
@@ -85,9 +91,19 @@ class ReviewAgent:
                 assert isinstance(output, ReviewAgentOutput)
             except (OutputValidationError, AssertionError):
                 if i == len(REVIEWER_MODELS) - 1:
+                    # Preserve an excerpt of the last (most capable) model's raw
+                    # output — without this, a parse failure here is a total
+                    # black box: the reason string is the only place any trace
+                    # of what actually went wrong survives past this call.
+                    excerpt = result.content[:500]
+                    if len(result.content) > 500:
+                        excerpt += "... [truncated]"
                     return ReviewVerdict(
                         passed=False,
-                        reason="Reviewer failed to produce a valid output after all model attempts.",
+                        reason=(
+                            "Reviewer failed to produce a valid output after all model "
+                            f"attempts. Last raw output: {excerpt}"
+                        ),
                         suggestions=["Manual review required."],
                     )
                 continue
