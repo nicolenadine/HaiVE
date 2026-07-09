@@ -75,8 +75,14 @@ class TestCreateBranch:
             mock_run.return_value = MagicMock(returncode=0)
             adapter.create_branch("haive/project-1", "main")
 
-        mock_run.assert_called_once_with(
-            ["git", "checkout", "-B", "haive/project-1", "main"],
+        # base_branch is fetched fresh (not checked out by local name
+        # directly) so a stale local ref can't cause this task's commit to
+        # be built on the wrong parent.
+        assert mock_run.call_count == 2
+        calls = mock_run.call_args_list
+        assert calls[0] == call(["git", "fetch", "origin", "main"], check=True, capture_output=True)
+        assert calls[1] == call(
+            ["git", "checkout", "-B", "haive/project-1", "FETCH_HEAD"],
             check=True, capture_output=True,
         )
 
@@ -109,8 +115,11 @@ class TestCreateBranch:
             ref="refs/heads/haive/project-1",
             sha="abc123",
         )
-        mock_run.assert_called_once_with(
-            ["git", "checkout", "-B", "haive/project-1", "main"],
+        assert mock_run.call_count == 2
+        calls = mock_run.call_args_list
+        assert calls[0] == call(["git", "fetch", "origin", "main"], check=True, capture_output=True)
+        assert calls[1] == call(
+            ["git", "checkout", "-B", "haive/project-1", "FETCH_HEAD"],
             check=True, capture_output=True,
         )
 

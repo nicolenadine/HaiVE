@@ -71,9 +71,21 @@ class GitHubVCSAdapter:
         # create_git_ref only creates the branch on GitHub. Without a matching
         # local branch, push_commits()'s git commands would run against
         # whatever happens to be checked out, not this task's branch.
+        #
+        # base_branch is fetched fresh first rather than checked out by name
+        # directly — local git's cached ref for it can be stale relative to
+        # source.commit.sha (fetched via the API just above), since haive
+        # merges PRs through the GitHub API, which never touches local git
+        # state. A branch created off a stale local base would build this
+        # task's commit on the wrong parent, and push_commits()'s later push
+        # would be rejected as non-fast-forward against the real remote tip.
         try:
             subprocess.run(
-                ["git", "checkout", "-B", branch_name, base_branch],
+                ["git", "fetch", "origin", base_branch],
+                check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "checkout", "-B", branch_name, "FETCH_HEAD"],
                 check=True, capture_output=True,
             )
         except subprocess.CalledProcessError as e:
