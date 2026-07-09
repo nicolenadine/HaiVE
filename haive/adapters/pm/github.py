@@ -287,7 +287,12 @@ class GitHubPMAdapter:
         boundary; callers outside it only ever catch RuntimeError.
         """
         try:
-            self._repo_obj.get_milestone(int(project_id)).edit(state="closed")
+            ms = self._repo_obj.get_milestone(int(project_id))
+            # PyGithub's Milestone.edit() requires title positionally
+            # (unlike Issue.edit(), where every field including title is
+            # optional) — pass the milestone's own current title back so
+            # this is a pure state change, not a rename.
+            ms.edit(ms.title, state="closed")
         except github.GithubException as exc:
             raise RuntimeError(f"Could not close milestone #{project_id}: {exc}") from exc
 

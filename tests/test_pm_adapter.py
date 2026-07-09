@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 import github
+import github.Milestone
 import pytest
 
 from haive.adapters.pm.github import GitHubPMAdapter, _parse_checkpoint
@@ -256,14 +257,21 @@ class TestListOpenMilestones:
 
 class TestCloseMilestone:
     def test_closes_the_milestone_by_number(self):
+        # Regression test: Milestone.edit() requires title positionally in
+        # PyGithub's own signature (unlike Issue.edit(), where every field
+        # is optional) — a bare MagicMock() doesn't validate call arguments
+        # against the real class, so it previously let a call missing that
+        # required argument pass silently here while crashing for real
+        # against the actual GitHub API. create_autospec catches that.
         adapter = _make_adapter()
-        ms = MagicMock()
+        ms = create_autospec(github.Milestone.Milestone, instance=True)
+        ms.title = "M2 — Path Resolution"
         adapter._repo_obj.get_milestone.return_value = ms
 
         adapter.close_milestone("7")
 
         adapter._repo_obj.get_milestone.assert_called_once_with(7)
-        ms.edit.assert_called_once_with(state="closed")
+        ms.edit.assert_called_once_with("M2 — Path Resolution", state="closed")
 
     def test_github_exception_is_translated_to_runtime_error(self):
         # Regression test: github.GithubException must never cross the
