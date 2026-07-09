@@ -92,8 +92,10 @@ class TestAttemptLogEntryReasonTruncation:
         assert entry.reason == "short reason"
 
     def test_long_reason_is_truncated(self):
-        entry = AttemptLogEntry(tier=Complexity.MEDIUM, attempt=1, reason="x" * 1000)
-        assert len(entry.reason) < 1000
+        from haive.models.task import _MAX_ATTEMPT_LOG_REASON_CHARS
+        over_limit = _MAX_ATTEMPT_LOG_REASON_CHARS + 1000
+        entry = AttemptLogEntry(tier=Complexity.MEDIUM, attempt=1, reason="x" * over_limit)
+        assert len(entry.reason) < over_limit
         assert entry.reason.endswith("[truncated]")
 
     def test_truncation_boundary_is_exact(self):

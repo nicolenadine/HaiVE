@@ -86,7 +86,7 @@ test_generator_agent:
     - "mock external dependencies"
   system_prompt: "prompts/test_generator_agent.md"
   output_schema: "schemas/test_generator_output.json"
-  max_tokens: 8192
+  max_tokens: 16384
   retry_limit: 2
   prompt_version: "1.0"
 

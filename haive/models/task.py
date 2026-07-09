@@ -4,7 +4,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 
-_MAX_ATTEMPT_LOG_REASON_CHARS = 500
+_MAX_ATTEMPT_LOG_REASON_CHARS = 50000
+# TODO: temporarily generous (was 500) so failed schema-validation attempts
+# keep their full raw output for diagnosis instead of being cut off after
+# 500 chars, which made it impossible to tell truncated-by-max_tokens output
+# apart from a parser bug after the fact. Restrict this again once there's
+# a proper place (e.g. a per-task debug log) for the full text to live
+# without bloating the orchestrator's prompt / GitHub comments.
 
 
 class Project(BaseModel):
