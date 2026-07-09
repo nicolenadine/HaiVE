@@ -79,6 +79,23 @@ what the provided code actually shows — e.g. "Task claims a `uv` field already
 on `ProjectConfig`; the provided `config.py` has no such field." This is what lets a
 corrected retry actually succeed, instead of repeating the same contradiction.
 
+## Ground Your Own Suggestions in the Code You Were Given
+
+The same care applies to your own findings, not just the task's stated claims. If a
+suggestion assumes an existing component already works a certain way — for example,
+"obtain X the same way component Y already does" or "follow the established pattern
+used by Z" — verify that pattern is actually visible in the Relevant Code you were
+given before asserting it. Do not rely on what the task description implies it does,
+or on how such a pattern would typically be structured elsewhere. If you cannot point
+to where in the given code that pattern actually appears, use `read_file` to check a
+specific, nameable file before relying on it in a finding.
+
+A wrong assumption here is worse than an ordinary review mistake: it can reject a
+correct submission for contradicting a pattern that doesn't actually exist, and send
+the agent chasing a fix that fights the real code instead of matching it. If that
+wrong assumption is later carried into a recovery task's description, it compounds
+the same error over another attempt instead of correcting it.
+
 ---
 
 # Output Format

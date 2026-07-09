@@ -766,6 +766,39 @@ class TestCreateTask:
         assert len(written_text) <= 1024
         assert written_text.endswith("[truncated]")
 
+    def test_acceptance_criteria_within_char_limit_but_over_byte_limit_is_truncated(self):
+        # Regression test: GitHub's limit is enforced on UTF-8 byte length,
+        # not Python character count. LLM-generated prose constantly uses
+        # multi-byte characters (em dashes, curly quotes, ellipses) — a
+        # string of exactly 1024 Python characters full of em dashes is
+        # already ~2000 UTF-8 bytes, so bounding by len(value) alone still
+        # let it through to crash the mutation. This is what actually
+        # crashed create_task for a real recovery task's acceptance criteria.
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestone.return_value = MagicMock()
+        gh_issue = MagicMock()
+        gh_issue.number = 1
+        gh_issue.raw_data = {"node_id": "I_node1"}
+        adapter._repo_obj.create_issue.return_value = gh_issue
+
+        calls: list[dict] = []
+        def capture(q: str, v: dict) -> dict:
+            calls.append(v)
+            if "addProjectV2ItemById" in q:
+                return self._add_response()
+            return self._update_response()
+        adapter._graphql.side_effect = capture
+
+        # Each "—" is 1 Python character but 3 UTF-8 bytes.
+        em_dash_heavy = "—" * 1024
+        assert len(em_dash_heavy) == 1024
+        adapter.create_task("1", self._make_task(acceptance_criteria=[em_dash_heavy]))
+
+        criteria_call = calls[-1]
+        written_text = criteria_call["value"]["text"]
+        assert len(written_text.encode("utf-8")) <= 1024
+        assert written_text.endswith("[truncated]")
+
     def test_lineage_depth_passed_as_float(self):
         adapter = _make_adapter()
         adapter._repo_obj.get_milestone.return_value = MagicMock()

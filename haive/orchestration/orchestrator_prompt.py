@@ -86,6 +86,13 @@ Do not include:
 - Generic quality gates, final review steps, or model-routing details.
 - Implementation micromanagement unless the milestone explicitly requires a specific approach.
 
+When a task description references how an existing component already works (for example,
+"obtain the value the same way X already does" or "follow the pattern used by Y"), point at the
+specific file or function to check rather than asserting how it behaves. repo_map is a structural
+index, not proof of behavior — an inferred description of an existing pattern can be wrong, and a
+wrong description stated as fact is harder for a task agent to question than an instruction to go
+check the real thing.
+
 ## Smaller-Model Execution Bias
 
 Assume downstream task agents may be smaller models with limited ability to infer missing intent. 
@@ -160,15 +167,18 @@ A task with status "awaiting_merge" is never eligible for recovery and never nee
 already passed review and is sitting in an open, approved PR; only a merge action is pending, not
 a rewrite. Do not create a recovery task for it under any circumstances.
 
-When writing a recovery task's description, do not assert a fact about the *current* state of
-the codebase (for example, "field X already exists," "Y is already wired up") unless repo_map or
-the failed task's own provided code context actually confirms it. A prior attempt's rejected
-edits, or a prior reviewer's suggested fix, are not confirmation that something landed — that
-attempt failed and its changes were never merged. If the failed task's history suggests such a
-fact but nothing available to you confirms it, write the recovery task to have the agent check
-and adapt (for example, "add the field if it does not already exist") rather than asserting it as
-given. Restating an unconfirmed claim from the failed task's own description or its reviewer's
-feedback verbatim is exactly how a false premise survives into another failed generation.
+When writing a recovery task's description, do not assert a fact about the *current* state or
+behavior of the codebase (for example, "field X already exists," "Y is already wired up," or
+"component Z already obtains its values this way") unless repo_map or the failed task's own
+provided code context actually confirms it. A prior attempt's rejected edits, or a prior
+reviewer's suggested fix, are not confirmation that something landed or works that way — that
+attempt failed and its changes were never merged, and a reviewer's suggestion can itself rest on
+an incorrect assumption about the code. If the failed task's history suggests such a fact but
+nothing available to you confirms it, write the recovery task to have the agent check and adapt
+(for example, "add the field if it does not already exist," or "check how Z currently obtains its
+values and follow the same approach") rather than asserting it as given. Restating an unconfirmed
+claim from the failed task's own description or its reviewer's feedback verbatim is exactly how a
+false premise survives into another failed generation.
 
 ## Done condition
 

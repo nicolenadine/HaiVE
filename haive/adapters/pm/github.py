@@ -16,18 +16,28 @@ _CHECKPOINT_RE = re.compile(r"^#Checkpoint:\s*(true|false)\s*$", re.IGNORECASE |
 
 # GitHub Projects v2 hard limit for "text" custom field values, confirmed
 # empirically (not documented anywhere public as of writing): a
-# updateProjectV2ItemFieldValue mutation with a text value over 1024
-# characters fails the entire mutation with "Column value must be a valid
-# value for text column" — not a graceful per-field rejection, a crash of
-# whatever multi-step operation (e.g. create_task) was mid-flight.
-_MAX_TEXT_FIELD_CHARS = 1024
+# updateProjectV2ItemFieldValue mutation with a text value over 1024 bytes
+# fails the entire mutation with "Column value must be a valid value for
+# text column" — not a graceful per-field rejection, a crash of whatever
+# multi-step operation (e.g. create_task) was mid-flight. The limit is
+# enforced on UTF-8 byte length, not Python character count — a string
+# within 1024 characters can still exceed 1024 bytes once it contains any
+# multi-byte characters (em dashes, curly quotes, ellipses), which
+# LLM-generated prose uses constantly; bounding by len(value) alone still
+# let those strings through to crash the mutation.
+_MAX_TEXT_FIELD_BYTES = 1024
 
 
 def _bounded_text(value: str) -> str:
-    if len(value) <= _MAX_TEXT_FIELD_CHARS:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= _MAX_TEXT_FIELD_BYTES:
         return value
     marker = "\n… [truncated]"
-    return value[: _MAX_TEXT_FIELD_CHARS - len(marker)] + marker
+    budget = _MAX_TEXT_FIELD_BYTES - len(marker.encode("utf-8"))
+    # decode(errors="ignore") drops any multi-byte sequence left incomplete
+    # by the byte-offset cut, instead of raising or corrupting the text.
+    truncated = encoded[:budget].decode("utf-8", errors="ignore")
+    return truncated + marker
 
 
 def _parse_checkpoint(description: str) -> bool:
@@ -485,7 +495,7 @@ class GitHubPMAdapter:
         })
         self._update_field(item_id, "haive_depends_on", {"text": ""})
         self._update_field(item_id, "haive_lineage_depth", {"number": float(task.lineage_depth)})
-        self._update_field(item_id, "haive_recovery_for", {"text": task.recovery_for or ""})
+        self._update_field(item_id, "haive_recovery_for", {"text": _bounded_text(task.recovery_for or "")})
         acceptance_criteria_text = _bounded_text("\n".join(task.acceptance_criteria))
         self._update_field(item_id, "haive_acceptance_criteria", {
             "text": acceptance_criteria_text,
