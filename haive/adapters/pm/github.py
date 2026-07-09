@@ -285,11 +285,18 @@ class GitHubPMAdapter:
         self._repo_obj.get_milestone(int(project_id)).edit(state="closed")
 
     def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
-        """Project-board items belonging to this milestone, excluding closed issues.
+        """Project-board items belonging to this milestone.
 
-        Closing an issue and removing it from the Projects v2 board are separate
-        GitHub operations — a closed issue can still be attached to the board.
-        A closed issue is never an active task regardless of board membership.
+        Excludes closed issues, unless haive itself closed them by marking
+        the task COMPLETE (see update_status()). Closing an issue and
+        removing it from the Projects v2 board are separate GitHub
+        operations — a closed issue can still be attached to the board, and
+        one closed for any other reason is never an active task regardless
+        of board membership. But a completed task must still be returned
+        here: TaskScheduler resolves a pending task's dependencies by
+        looking up dependency task_ids in get_tasks()'s result, and a
+        completed dependency missing from that list can never resolve,
+        silently stranding anything depending on it forever.
         """
         raw_items = self._fetch_project_items()
         result: list[dict[str, Any]] = []
@@ -298,7 +305,9 @@ class GitHubPMAdapter:
             if not content or "number" not in content:
                 continue
             if content.get("state") == "CLOSED":
-                continue
+                fields = self._extract_field_values(item.get("fieldValues", {}).get("nodes", []))
+                if fields.get("Status", "").lower() != "complete":
+                    continue
             item_milestone = content.get("milestone")
             if not item_milestone or item_milestone.get("number") != milestone_number:
                 continue
@@ -441,6 +450,12 @@ class GitHubPMAdapter:
         self._update_field(item_id, "Status", {
             "singleSelectOptionId": self._status_option_ids[status.value],
         })
+        if status == TaskStatus.COMPLETE:
+            # COMPLETE is the only status haive itself ever sets that means
+            # "genuinely finished" — closing the issue here (not just the
+            # board's Status field) keeps GitHub's own open/closed state in
+            # sync, the same way close_milestone() does for milestones.
+            self._repo_obj.get_issue(int(task_id)).edit(state="closed")
 
     def add_comment(self, task_id: str, body: str) -> None:
         self._repo_obj.get_issue(int(task_id)).create_comment(body)
