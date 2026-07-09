@@ -707,6 +707,37 @@ class TestCreateTask:
         criteria_call = calls[-1]
         assert criteria_call["value"] == {"text": "Step A\nStep B"}
 
+    def test_acceptance_criteria_over_1024_chars_is_truncated(self):
+        # Regression test: GitHub Projects v2 "text" custom fields hard-fail
+        # the entire mutation ("Column value must be a valid value for text
+        # column") if the value exceeds 1024 characters — confirmed
+        # empirically against a real project board, not documented anywhere
+        # public. A detailed recovery task's joined acceptance criteria can
+        # easily exceed this, crashing create_task entirely and leaving a
+        # half-initialized GitHub issue behind.
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestone.return_value = MagicMock()
+        gh_issue = MagicMock()
+        gh_issue.number = 1
+        gh_issue.raw_data = {"node_id": "I_node1"}
+        adapter._repo_obj.create_issue.return_value = gh_issue
+
+        calls: list[dict] = []
+        def capture(q: str, v: dict) -> dict:
+            calls.append(v)
+            if "addProjectV2ItemById" in q:
+                return self._add_response()
+            return self._update_response()
+        adapter._graphql.side_effect = capture
+
+        long_criteria = ["x" * 2000]
+        adapter.create_task("1", self._make_task(acceptance_criteria=long_criteria))
+
+        criteria_call = calls[-1]
+        written_text = criteria_call["value"]["text"]
+        assert len(written_text) <= 1024
+        assert written_text.endswith("[truncated]")
+
     def test_lineage_depth_passed_as_float(self):
         adapter = _make_adapter()
         adapter._repo_obj.get_milestone.return_value = MagicMock()
@@ -754,6 +785,21 @@ class TestSetDependency:
 
         call_vars = adapter._graphql.call_args[0][1]
         assert call_vars["value"] == {"text": ""}
+
+    def test_pathologically_many_dependencies_is_truncated(self):
+        # Same 1024-char hard limit as create_task's acceptance criteria —
+        # unlikely in practice but cheap, consistent insurance against the
+        # same class of crash.
+        adapter = _make_adapter()
+        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
+        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
+
+        many_deps = [str(i) for i in range(500)]
+        adapter.set_dependency("42", many_deps)
+
+        call_vars = adapter._graphql.call_args[0][1]
+        assert len(call_vars["value"]["text"]) <= 1024
+        assert call_vars["value"]["text"].endswith("[truncated]")
 
 
 # ---------------------------------------------------------------------------

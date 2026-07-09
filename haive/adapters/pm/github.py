@@ -14,6 +14,21 @@ from haive.models.task import MilestoneSummary, Project, Task, TaskComment
 
 _CHECKPOINT_RE = re.compile(r"^#Checkpoint:\s*(true|false)\s*$", re.IGNORECASE | re.MULTILINE)
 
+# GitHub Projects v2 hard limit for "text" custom field values, confirmed
+# empirically (not documented anywhere public as of writing): a
+# updateProjectV2ItemFieldValue mutation with a text value over 1024
+# characters fails the entire mutation with "Column value must be a valid
+# value for text column" — not a graceful per-field rejection, a crash of
+# whatever multi-step operation (e.g. create_task) was mid-flight.
+_MAX_TEXT_FIELD_CHARS = 1024
+
+
+def _bounded_text(value: str) -> str:
+    if len(value) <= _MAX_TEXT_FIELD_CHARS:
+        return value
+    marker = "\n… [truncated]"
+    return value[: _MAX_TEXT_FIELD_CHARS - len(marker)] + marker
+
 
 def _parse_checkpoint(description: str) -> bool:
     """Defaults to True (gated) when the marker is absent, so every existing
@@ -454,8 +469,9 @@ class GitHubPMAdapter:
         self._update_field(item_id, "haive_depends_on", {"text": ""})
         self._update_field(item_id, "haive_lineage_depth", {"number": float(task.lineage_depth)})
         self._update_field(item_id, "haive_recovery_for", {"text": task.recovery_for or ""})
+        acceptance_criteria_text = _bounded_text("\n".join(task.acceptance_criteria))
         self._update_field(item_id, "haive_acceptance_criteria", {
-            "text": "\n".join(task.acceptance_criteria),
+            "text": acceptance_criteria_text,
         })
         return self._map_issue_to_task(_GitHubIssue(
             issue_node_id=content_node_id,
@@ -469,12 +485,12 @@ class GitHubPMAdapter:
             haive_complexity=task.complexity.value,
             haive_lineage_depth=task.lineage_depth,
             haive_recovery_for=task.recovery_for,
-            haive_acceptance_criteria="\n".join(task.acceptance_criteria),
+            haive_acceptance_criteria=acceptance_criteria_text,
         ))
 
     def set_dependency(self, task_id: str, depends_on: list[str]) -> None:
         item_id = self._get_project_item_id(task_id)
-        self._update_field(item_id, "haive_depends_on", {"text": ", ".join(depends_on)})
+        self._update_field(item_id, "haive_depends_on", {"text": _bounded_text(", ".join(depends_on))})
 
     def update_status(self, task_id: str, status: TaskStatus) -> None:
         item_id = self._get_project_item_id(task_id)
