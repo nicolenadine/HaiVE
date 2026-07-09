@@ -677,3 +677,39 @@ class TestAPIErrorHandling:
 
         with pytest.raises(APIError):
             executor.run(make_task(), **svc)
+
+    def test_reraised_api_error_resets_status_to_pending_not_stuck_in_progress(self, tmp_path):
+        # Regression test: any exception that escapes _run_inner after
+        # IN_PROGRESS was set must reset the task back to PENDING, or it's
+        # stuck forever — the scheduler only ever re-schedules PENDING
+        # tasks, and nothing else revisits an IN_PROGRESS one.
+        executor = make_executor(tmp_path, low_attempts=5)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.side_effect = APIError("persistent failure")
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+
+        with pytest.raises(APIError):
+            executor.run(make_task(), **svc)
+
+        statuses = [call.args[1] for call in svc["pm"].update_status.call_args_list]
+        assert statuses[0] == TaskStatus.IN_PROGRESS
+        assert statuses[-1] == TaskStatus.PENDING
+
+
+class TestUnexpectedExceptionResetsStatus:
+    def test_exception_from_create_branch_resets_status_to_pending(self, tmp_path):
+        # This is the exact real-world scenario that stranded a task at
+        # IN_PROGRESS: vcs.create_branch() raised before the tier loop (and
+        # its own try/finally) even started, bypassing every existing
+        # cleanup path entirely.
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+        svc["vcs"].create_branch.side_effect = RuntimeError("git command failed")
+
+        with pytest.raises(RuntimeError, match="git command failed"):
+            executor.run(make_task(), **svc)
+
+        statuses = [call.args[1] for call in svc["pm"].update_status.call_args_list]
+        assert statuses == [TaskStatus.IN_PROGRESS, TaskStatus.PENDING]
