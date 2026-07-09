@@ -370,6 +370,23 @@ class TestRunWaveSummary:
         assert "Task #7 — blocked" in result.output
         assert "1 blocked" in result.output
 
+    def test_scheduler_receives_already_complete_tasks_too(self):
+        # Regression test: TaskScheduler only ever executes PENDING tasks, but
+        # it resolves dependency status by looking up task IDs in whatever
+        # list it's handed. A pending task depending on an already-complete
+        # task from an earlier wave must still see that task passed in, or
+        # the dependency can never resolve — the task silently never runs
+        # again, in any future wave, with no error and no wave-summary count.
+        m = _base_mocks()
+        completed = make_task(task_id="1", status=TaskStatus.COMPLETE)
+        pending = make_task(task_id="2", status=TaskStatus.PENDING, depends_on=["1"])
+        m["pm"].get_tasks.return_value = [completed, pending]
+        _run_with_mocks(m)
+        passed_tasks = m["scheduler"].start.call_args[0][0]
+        passed_ids = {t.task_id for t in passed_tasks}
+        assert "1" in passed_ids
+        assert "2" in passed_ids
+
 
 class TestRunAutonomousWaveLoop:
     def test_second_wave_runs_automatically_until_done(self):

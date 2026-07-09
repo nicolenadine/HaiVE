@@ -726,10 +726,19 @@ def _run_milestone(
                                 update={"depends_on": resolved}
                             )
 
-                # Combine pre-existing pending tasks with newly created ones.
-                # Newly created tasks come from the adapter directly (not re-read from GitHub)
-                # because Projects v2 GraphQL does not reflect new items immediately.
-                all_tasks = pending_tasks + new_task_objects
+                # The scheduler needs every known task, not just the pending ones,
+                # so a pending task that depends on an already-complete task from
+                # an earlier wave can resolve that dependency — TaskScheduler only
+                # ever schedules PENDING tasks itself, but it looks up dependency
+                # statuses across the whole set handed to it. Passing just the
+                # pending subset leaves any such dependency's status permanently
+                # unresolvable (not in the map, so never COMPLETE), silently
+                # stranding that task forever with no error and no wave-summary
+                # count for it. Newly created tasks come from the adapter
+                # directly (not re-read from GitHub) because Projects v2 GraphQL
+                # does not reflect new items immediately, so they're appended
+                # rather than being part of `tasks`.
+                all_tasks = tasks + new_task_objects
 
                 wave_complete = 0
                 wave_needs_review = 0
