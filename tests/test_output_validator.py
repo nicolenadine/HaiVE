@@ -86,6 +86,47 @@ class TestJsonExtraction:
         result = OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
         assert isinstance(result, CodeEditorOutput)
 
+    def test_unbalanced_brace_inside_generated_code_content_does_not_break_extraction(self):
+        # Regression test: a naive character-counting brace scanner doesn't
+        # know it's inside a JSON string value, so a single stray '}' in
+        # generated source code (an f-string fragment, a dict literal, a
+        # comment) can desynchronize the depth count and cut the JSON span
+        # short before the real closing brace — even though the JSON itself
+        # is well-formed. This is what actually broke test_generator_agent
+        # output in production: generated test code containing braces.
+        payload = {
+            "edits": [{
+                "path": "tests/test_cli.py",
+                "content": 'def test_x():\n    return f"{value}"\n',
+            }],
+            "notes": "",
+        }
+        raw = json.dumps(payload)
+        result = OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+        assert result.edits[0].content == payload["edits"][0]["content"]
+
+    def test_stray_unmatched_closing_brace_inside_string_value(self):
+        # A lone '}' inside a string, with no matching '{' anywhere nearby in
+        # that string, is the sharpest version of the bug: it can bring a
+        # naive counter's running depth to zero prematurely.
+        raw = r'{"edits": [{"path": "a.py", "content": "x = 1}\n"}], "notes": ""}'
+        result = OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+        assert result.edits[0].content == "x = 1}\n"
+
+    def test_escaped_backslash_before_quote_does_not_confuse_string_tracking(self):
+        # A literal backslash immediately preceding a quote (e.g. a Windows
+        # path) must not be misread as escaping that quote.
+        payload = {
+            "edits": [{"path": "a.py", "content": 'path = "C:\\\\temp"\n'}],
+            "notes": "",
+        }
+        raw = json.dumps(payload)
+        result = OutputValidator().validate(raw, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+        assert result.edits[0].content == payload["edits"][0]["content"]
+
 
 # ── schema validation ─────────────────────────────────────────────────────────
 

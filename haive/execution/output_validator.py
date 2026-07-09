@@ -72,6 +72,14 @@ class OutputValidator:
         candidate span is validated with json.loads before being accepted;
         a span that merely balances but doesn't parse is skipped in favor of
         the next one.
+
+        Brace depth is tracked with awareness of JSON string literals (quote
+        and backslash-escape state), not just raw character counts — a single
+        stray '{' or '}' inside a string value (e.g. generated source code
+        containing a dict literal, f-string, or set comprehension) would
+        otherwise desynchronize a naive counter and cut the span short before
+        the real closing brace, producing invalid JSON that fails every
+        candidate even though the model's actual answer was well-formed.
         """
         text = raw.strip()
 
@@ -90,7 +98,20 @@ class OutputValidator:
                 break
             depth = 0
             end = None
+            in_string = False
+            escape = False
             for i, ch in enumerate(text[start:], start):
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\" and in_string:
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
                 if ch == "{":
                     depth += 1
                 elif ch == "}":
