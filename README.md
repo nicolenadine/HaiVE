@@ -80,8 +80,8 @@ Re-running `haive run` against the same milestone picks up where it left off —
 | `haive config create/use/set/show/list/edit/delete` | Manage named configs (`~/.haive/configs/<name>.env`). Only one config is "active" at a time. |
 | `haive project setup` | Create or configure a Haive-compatible GitHub Project v2 board; writes `GITHUB_PROJECT_ID` back to the active config. |
 | `haive index [--validate]` | Generate (or validate) the per-directory `agent.md` index task agents use to navigate the repo. Required before `haive run`. |
-| `haive run [--project N] [--dry-run] [--no-merge] [--quiet]` | Run the harness against a milestone. See "How it works" above and `haive run --help` for all flags. |
-| `haive run-all [--dry-run] [--no-merge] [--quiet]` | Work through every open milestone in `due_on` order, stopping at the first one that's gated-and-done or not yet done. See "How it works" above. |
+| `haive run [--project N] [--dry-run] [--no-merge] [--quiet] [--unstall ID]` | Run the harness against a milestone. See "How it works" above and `haive run --help` for all flags. |
+| `haive run-all [--dry-run] [--no-merge] [--quiet] [--unstall ID]` | Work through every open milestone in `due_on` order, stopping at the first one that's gated-and-done or not yet done. See "How it works" above. |
 | `haive prune-branches [--yes]` | List `haive/task-*` branches whose PRs have been merged, and delete them after confirmation. |
 | `haive discover <description>` | Standalone: preview what code context the discovery agent would surface for a task description, without running anything. |
 | `haive load <description>` | Standalone: preview the actual loaded source content for a task description (discover + load), as a task would see it. |
@@ -103,7 +103,7 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 | `OLLAMA_API_BASE` | no | `http://localhost:11434` | Base URL for local Ollama models, if used. |
 | `MAX_WAVES_PER_RUN` | no | `2` | Caps how many plan/execute waves one `haive run` invocation will loop through automatically. |
 | `MAX_MILESTONES_PER_RUN` | no | `3` | Caps how many milestones one `haive run-all` invocation will advance through automatically. |
-| `MAX_RECOVERY_DEPTH` | no | `3` | Caps how many times the orchestrator can chain recovery tasks for the same failure lineage before escalating to a human. |
+| `MAX_RECOVERY_DEPTH` | no | `3` | Caps how many times the orchestrator can chain recovery tasks for the same failure lineage before escalating to a human. Once hit, `haive run --unstall <task_id>` (after reviewing and correcting the issue) authorizes exactly one more recovery attempt for that specific lineage, without raising the limit for anything else. |
 | `MAX_EXECUTORS` | no | `4` | Max tasks executed concurrently within a wave (only independent tasks — dependency order is always respected). |
 | `OBSERVABILITY_ENABLED` | no | `false` | Enables OpenTelemetry tracing (with LiteLLM auto-instrumentation) for each run. |
 | `PHOENIX_OTLP_ENDPOINT` | no | `http://localhost:6006/v1/traces` | Where OTel traces are exported when observability is enabled. |
