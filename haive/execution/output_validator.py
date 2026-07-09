@@ -43,6 +43,46 @@ _SCHEMA_MAP: dict[AgentRole, type[BaseModel]] = {
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
 
 
+def _escape_bare_control_chars_in_strings(text: str) -> str:
+    """Escape literal newline/tab/carriage-return characters found inside
+    JSON string values, as a repair pass for otherwise-malformed candidates.
+
+    A model occasionally emits a bare control character instead of the
+    required two-character escape sequence when generating a long code
+    string inside a JSON field (e.g. a multi-line docstring) — one raw byte
+    like this makes an otherwise well-formed, correctly-delimited JSON
+    object fail to parse. Only characters inside string spans are touched
+    (tracked the same quote/escape-aware way as extract_json's brace
+    scanner); whitespace used for JSON formatting outside strings, and
+    already-escaped sequences, are left untouched.
+    """
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            out.append(ch)
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            out.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ch == "\n":
+            out.append("\\n")
+        elif in_string and ch == "\t":
+            out.append("\\t")
+        elif in_string and ch == "\r":
+            out.append("\\r")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 class OutputValidator:
     """Validates raw LLM output against the schema for a given agent role."""
 
@@ -129,6 +169,13 @@ class OutputValidator:
                 json.loads(candidate)
                 return candidate
             except (ValueError, TypeError):
-                continue
+                pass
+            repaired = _escape_bare_control_chars_in_strings(candidate)
+            if repaired != candidate:
+                try:
+                    json.loads(repaired)
+                    return repaired
+                except (ValueError, TypeError):
+                    pass
 
         return None

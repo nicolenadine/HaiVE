@@ -127,6 +127,55 @@ class TestJsonExtraction:
         assert isinstance(result, CodeEditorOutput)
         assert result.edits[0].content == payload["edits"][0]["content"]
 
+    def test_bare_newline_inside_string_is_repaired(self):
+        # Regression test: a model can emit a literal newline byte instead
+        # of the required \n escape sequence when generating a long code
+        # string inside a JSON field (e.g. a multi-line NumPy-style
+        # docstring) — this happened for real generating a file with a
+        # "Parameters\n----------" section header. The resulting text is
+        # otherwise well-formed, correctly-delimited JSON that fails to
+        # parse over one bad byte; it must be repaired, not discarded.
+        payload = {
+            "edits": [{
+                "path": "a.py",
+                "content": 'def f():\n    """Docstring.\n\n    Parameters\n    ----------\n    x: int\n    """\n    pass\n',
+            }],
+            "notes": "",
+        }
+        raw = json.dumps(payload)
+        marker = "Parameters"
+        idx = raw.index(marker)
+        before = raw[:idx]
+        last_escaped_n = before.rfind("\\n")
+        corrupted = before[:last_escaped_n] + "\n" + before[last_escaped_n + 2:] + raw[idx:]
+        # Confirm the corruption actually breaks plain json.loads, so this
+        # test is exercising the repair path, not a no-op.
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(corrupted)
+
+        result = OutputValidator().validate(corrupted, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+        assert result.edits[0].content == payload["edits"][0]["content"]
+
+    def test_bare_tab_and_carriage_return_inside_string_are_repaired(self):
+        payload = {"edits": [{"path": "a.py", "content": "line one"}], "notes": ""}
+        raw = json.dumps(payload)
+        corrupted = raw.replace("line one", "line\tone\rtwo")
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(corrupted)
+
+        result = OutputValidator().validate(corrupted, AgentRole.CODE_EDITOR_AGENT)
+        assert isinstance(result, CodeEditorOutput)
+        assert result.edits[0].content == "line\tone\rtwo"
+
+    def test_already_valid_json_is_not_altered_by_the_repair_pass(self):
+        # The repair pass must only ever be a fallback for candidates that
+        # already failed to parse — it must not change output for the
+        # common, well-formed case.
+        raw = json.dumps(VALID_CODE_EDITOR)
+        result = OutputValidator.extract_json(raw)
+        assert result == raw
+
 
 # ── schema validation ─────────────────────────────────────────────────────────
 
