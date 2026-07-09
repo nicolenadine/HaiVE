@@ -49,8 +49,24 @@ class GitHubVCSAdapter:
                 sha=source.commit.sha,
             )
         except github.GithubException as exc:
-            if exc.status != 422:  # 422 = branch already exists remotely — reuse it
+            if exc.status != 422:  # 422 = branch already exists remotely
                 raise
+            # A stale branch left over from an earlier, incomplete attempt at
+            # this same task would otherwise keep whatever commits it already
+            # had — diverging from base_branch's current tip, so the later
+            # plain `git push` in push_commits() gets rejected as
+            # non-fast-forward. Delete and recreate fresh so the remote
+            # branch and the local one (reset below via checkout -B) always
+            # start from the same point.
+            try:
+                self.delete_branch(branch_name)
+            except github.GithubException as delete_exc:
+                if delete_exc.status != 404:  # already gone — fine, proceed
+                    raise
+            self._repo_obj.create_git_ref(
+                ref=f"refs/heads/{branch_name}",
+                sha=source.commit.sha,
+            )
 
         # create_git_ref only creates the branch on GitHub. Without a matching
         # local branch, push_commits()'s git commands would run against

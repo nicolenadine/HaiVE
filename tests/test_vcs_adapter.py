@@ -80,21 +80,61 @@ class TestCreateBranch:
             check=True, capture_output=True,
         )
 
-    def test_reuses_branch_that_already_exists_remotely(self):
+    def test_stale_branch_that_already_exists_remotely_is_deleted_and_recreated(self):
+        # Regression test: blindly "reusing" a branch that already exists
+        # remotely (e.g. left over from an earlier, incomplete attempt at
+        # this same task) keeps whatever stale commits it had, diverging
+        # from base_branch's current tip — the later plain `git push` in
+        # push_commits() then gets rejected as non-fast-forward. The stale
+        # branch must be deleted and recreated fresh instead.
         adapter = _make_adapter()
         source = MagicMock()
         source.commit.sha = "abc123"
         adapter._repo_obj.get_branch.return_value = source
-        adapter._repo_obj.create_git_ref.side_effect = github.GithubException(422, "exists", None)
+        adapter._repo_obj.create_git_ref.side_effect = [
+            github.GithubException(422, "exists", None),
+            None,
+        ]
+        ref_mock = MagicMock()
+        adapter._repo_obj.get_git_ref.return_value = ref_mock
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             adapter.create_branch("haive/project-1", "main")
 
+        adapter._repo_obj.get_git_ref.assert_called_once_with("heads/haive/project-1")
+        ref_mock.delete.assert_called_once()
+        assert adapter._repo_obj.create_git_ref.call_count == 2
+        adapter._repo_obj.create_git_ref.assert_called_with(
+            ref="refs/heads/haive/project-1",
+            sha="abc123",
+        )
         mock_run.assert_called_once_with(
             ["git", "checkout", "-B", "haive/project-1", "main"],
             check=True, capture_output=True,
         )
+
+    def test_stale_branch_already_deleted_by_someone_else_is_tolerated(self):
+        # If the branch vanished between our 422 and our delete attempt
+        # (e.g. a concurrent cleanup), that 404 must not fail create_branch —
+        # we still just proceed to recreate it fresh.
+        adapter = _make_adapter()
+        source = MagicMock()
+        source.commit.sha = "abc123"
+        adapter._repo_obj.get_branch.return_value = source
+        adapter._repo_obj.create_git_ref.side_effect = [
+            github.GithubException(422, "exists", None),
+            None,
+        ]
+        adapter._repo_obj.get_git_ref.return_value.delete.side_effect = (
+            github.GithubException(404, "not found", None)
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.create_branch("haive/project-1", "main")
+
+        assert adapter._repo_obj.create_git_ref.call_count == 2
 
     def test_local_checkout_failure_raises_runtime_error(self):
         adapter = _make_adapter()
