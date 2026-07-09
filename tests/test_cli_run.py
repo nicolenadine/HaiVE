@@ -291,6 +291,27 @@ class TestRunDoneTrue:
         m["vcs"].create_project_pr.assert_not_called()
         assert "nothing further to merge" in result.output.lower()
 
+    def test_done_true_with_nothing_ahead_closes_milestone(self):
+        # Regression test: a milestone genuinely finished (nothing left to
+        # merge) should be closed on GitHub so haive run-all's
+        # list_open_milestones() naturally skips it on every future
+        # invocation instead of re-verifying it's done each time.
+        m = _base_mocks()
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = False
+        _run_with_mocks(m)
+        m["pm"].close_milestone.assert_called_once_with("42")
+
+    def test_done_true_gated_final_pr_does_not_close_milestone(self):
+        # haive run never auto-merges its own final PR (auto_merge_final_pr
+        # is always False) — the milestone isn't actually done until a human
+        # merges it, so it must stay open.
+        m = _base_mocks()
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        result = _run_with_mocks(m)
+        assert result.exit_code == 0
+        m["pm"].close_milestone.assert_not_called()
+
 
 class TestRunProjectBranch:
     def test_ensures_project_branch_from_project_data(self):
@@ -673,6 +694,34 @@ class TestRunAll:
         assert called_ids == ["5", "6"]
         assert m["vcs"].merge_pr.call_count == 2
         assert "processed all 2 milestone(s)" in result.output.lower()
+
+    def test_auto_merged_milestones_are_each_closed(self):
+        m = _base_mocks()
+        milestones = [
+            make_milestone(number=5, due_on=None),
+            make_milestone(number=6, due_on=None),
+        ]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = True
+        m["vcs"].create_project_pr.return_value = "77"
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=False)
+
+        _run_all_with_mocks(m, milestones=milestones)
+
+        closed_ids = [c.args[0] for c in m["pm"].close_milestone.call_args_list]
+        assert closed_ids == ["5", "6"]
+
+    def test_gated_milestone_awaiting_merge_is_not_closed(self):
+        m = _base_mocks()
+        milestones = [make_milestone(number=5, due_on=None)]
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = True
+        m["vcs"].create_project_pr.return_value = "77"
+        m["pm"].get_project.side_effect = lambda mid: make_project(project_id=mid, checkpoint=True)
+
+        _run_all_with_mocks(m, milestones=milestones)
+
+        m["pm"].close_milestone.assert_not_called()
 
     def test_no_merge_overrides_checkpoint_false(self):
         m = _base_mocks()

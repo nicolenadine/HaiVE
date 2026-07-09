@@ -250,6 +250,22 @@ class TestListOpenMilestones:
 
 
 # ---------------------------------------------------------------------------
+# TestCloseMilestone
+# ---------------------------------------------------------------------------
+
+class TestCloseMilestone:
+    def test_closes_the_milestone_by_number(self):
+        adapter = _make_adapter()
+        ms = MagicMock()
+        adapter._repo_obj.get_milestone.return_value = ms
+
+        adapter.close_milestone("7")
+
+        adapter._repo_obj.get_milestone.assert_called_once_with(7)
+        ms.edit.assert_called_once_with(state="closed")
+
+
+# ---------------------------------------------------------------------------
 # TestGetTasks
 # ---------------------------------------------------------------------------
 

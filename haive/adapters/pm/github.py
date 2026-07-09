@@ -277,6 +277,13 @@ class GitHubPMAdapter:
             for ms in self._repo_obj.get_milestones(state="open")
         ]
 
+    def close_milestone(self, project_id: str) -> None:
+        """Close the milestone on GitHub once its final PR has merged, so
+        list_open_milestones() (haive run-all's queue) naturally skips it on
+        every future invocation instead of re-verifying it's done each time.
+        """
+        self._repo_obj.get_milestone(int(project_id)).edit(state="closed")
+
     def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
         """Project-board items belonging to this milestone, excluding closed issues.
 

@@ -697,6 +697,7 @@ def _run_milestone(
                                 try:
                                     vcs.merge_pr(pr_id)
                                     typer.echo("Final PR merged automatically (milestone checkpoint disabled).")
+                                    pm.close_milestone(milestone_id)
                                     return MilestoneRunOutcome.DONE_MERGED
                                 except RuntimeError as exc:
                                     typer.echo(f"Automatic merge of the final PR failed: {exc}")
@@ -707,6 +708,7 @@ def _run_milestone(
                                 "\nProject complete. All changes were already merged into main "
                                 "— nothing further to merge."
                             )
+                            pm.close_milestone(milestone_id)
                             return MilestoneRunOutcome.DONE_MERGED
 
                     # Create new tasks and resolve "new:N" dependency refs.
