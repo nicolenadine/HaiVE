@@ -296,7 +296,13 @@ def _format_recovery_lineage_summary(
             f"- Generation {task.lineage_depth} (#{task.task_id}): {reason} ({attempts} attempt(s))"
         )
     lines.append("")
-    lines.append("Human review is needed to break the chain — retrying is unlikely to help further.")
+    lines.append(
+        "Human review is needed to break the chain — retrying is unlikely to help further. "
+        "Once you've reviewed and corrected the underlying issue (e.g. posted a comment here "
+        f"with the fix), run `haive run --unstall {stalled_task_id}` (or add `--unstall "
+        f"{stalled_task_id}` to `haive run-all`) to authorize one recovery attempt beyond "
+        "max_recovery_depth for this task's lineage specifically."
+    )
     return "\n".join(lines)
 
 
@@ -560,6 +566,7 @@ def _run_milestone(
     auto_merge_final_pr: bool,
     command_name: str = "haive run",
     project_data=None,
+    unstall_task_id: str | None = None,
 ) -> MilestoneRunOutcome:
     """Run the harness against a single milestone until it's done, stalls,
     or runs out of waves for this invocation. Shared by both `run` (one
@@ -570,6 +577,11 @@ def _run_milestone(
     project_data lets a caller that already fetched the Project (run-all
     does, to read .checkpoint before deciding auto_merge_final_pr) pass it
     through instead of triggering a second, redundant fetch here.
+
+    unstall_task_id authorizes one recovery attempt beyond max_recovery_depth
+    for that specific task's lineage only — the escape hatch for a chain that
+    hit the depth cap, after a human has reviewed and corrected it. Every
+    other lineage is still held to the normal limit.
     """
     import os
     from pathlib import Path
@@ -786,9 +798,15 @@ def _run_milestone(
                         new_comments=new_comments,
                         agent_summary=registry.get_orchestrator_summary(),
                         repo_map=repo_map,
+                        unstall_task_id=unstall_task_id,
                     )
 
                     if not quiet:
+                        if unstall_task_id is not None:
+                            typer.echo(
+                                f"Note: task #{unstall_task_id} is exempted from "
+                                "max_recovery_depth for this run."
+                            )
                         typer.echo("Calling orchestrator...")
                     orchestrator = Orchestrator(model_client, tier_config, settings.max_recovery_depth, example_library)
                     try:
@@ -965,6 +983,16 @@ def run(
         is_flag=True,
         help="Suppress routine progress output. Outcomes and errors are still printed.",
     ),
+    unstall: str | None = typer.Option(
+        None,
+        "--unstall",
+        help=(
+            "Task id whose recovery chain hit max_recovery_depth. Authorizes one "
+            "recovery attempt beyond the limit for that task's lineage only, after "
+            "you've reviewed it (e.g. posted a corrective comment). Every other "
+            "lineage is still held to the normal limit."
+        ),
+    ),
 ) -> None:
     """Run the haive agent harness for a project milestone.
 
@@ -988,6 +1016,7 @@ def run(
     _run_milestone(
         milestone_id, agents, examples, dry_run, no_merge, quiet,
         auto_merge_final_pr=False,
+        unstall_task_id=unstall,
     )
 
 
@@ -1021,6 +1050,16 @@ def run_all(
         "-q",
         is_flag=True,
         help="Suppress routine progress output. Outcomes and errors are still printed.",
+    ),
+    unstall: str | None = typer.Option(
+        None,
+        "--unstall",
+        help=(
+            "Task id whose recovery chain hit max_recovery_depth. Authorizes one "
+            "recovery attempt beyond the limit for that task's lineage only, after "
+            "you've reviewed it (e.g. posted a corrective comment). Every other "
+            "lineage is still held to the normal limit."
+        ),
     ),
 ) -> None:
     """Work through every open milestone in order, without re-invoking per milestone.
@@ -1075,6 +1114,7 @@ def run_all(
             auto_merge_final_pr=(not no_merge) and (not project.checkpoint),
             command_name="haive run-all",
             project_data=project,
+            unstall_task_id=unstall,
         )
         processed += 1
 

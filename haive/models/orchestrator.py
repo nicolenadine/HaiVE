@@ -25,11 +25,16 @@ class OrchestratorTaskView(BaseModel):
 class OrchestratorInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    project:       Project
-    tasks:         list[OrchestratorTaskView]
-    new_comments:  list[TaskComment]
-    agent_summary: str
-    repo_map:      str = ""
+    project:          Project
+    tasks:            list[OrchestratorTaskView]
+    new_comments:     list[TaskComment]
+    agent_summary:    str
+    repo_map:         str = ""
+    # A human-authorized, one-time exemption from max_recovery_depth for this
+    # specific task's lineage — set via `haive run --unstall <task_id>` after
+    # a chain has stalled and a human has reviewed and corrected it. None in
+    # the ordinary case; the depth cap applies normally for every other task.
+    unstall_task_id: str | None = None
 
 
 class NewTask(BaseModel):

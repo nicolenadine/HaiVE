@@ -81,7 +81,14 @@ class Orchestrator:
         for new_task in output.new_tasks:
             if new_task.recovery_for is not None:
                 source_depth = task_depth.get(new_task.recovery_for, 0)
-                if source_depth + 1 > self._max_recovery_depth:
+                effective_max = self._max_recovery_depth
+                if new_task.recovery_for == input.unstall_task_id:
+                    # A human has explicitly reviewed this specific lineage and
+                    # authorized one recovery attempt beyond the normal cap
+                    # (haive run --unstall <task_id>) — every other lineage is
+                    # still held to max_recovery_depth.
+                    effective_max += 1
+                if source_depth + 1 > effective_max:
                     raise OrchestratorStalledError(
                         f"Recovery task for '{new_task.recovery_for}' would exceed "
                         f"max_recovery_depth ({self._max_recovery_depth}). "

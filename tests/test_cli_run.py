@@ -520,6 +520,26 @@ class TestRunAutonomousWaveLoop:
         assert "max_recovery_depth" in posted_comment
 
 
+class TestUnstallFlag:
+    def test_unstall_flag_threads_into_orchestrator_input(self):
+        m = _base_mocks()
+        _run_with_mocks(m, extra_args=["--unstall", "33"])
+        orch_input = m["orchestrator"].run_loop.call_args.args[0]
+        assert orch_input.unstall_task_id == "33"
+
+    def test_no_unstall_flag_leaves_it_none(self):
+        m = _base_mocks()
+        _run_with_mocks(m)
+        orch_input = m["orchestrator"].run_loop.call_args.args[0]
+        assert orch_input.unstall_task_id is None
+
+    def test_unstall_flag_threads_through_run_all(self):
+        m = _base_mocks()
+        _run_all_with_mocks(m, milestones=[make_milestone()], extra_args=["--unstall", "33"])
+        orch_input = m["orchestrator"].run_loop.call_args.args[0]
+        assert orch_input.unstall_task_id == "33"
+
+
 class TestReconciliation:
     def test_marks_merged_pr_as_complete_and_refreshes_tasks(self):
         m = _base_mocks()

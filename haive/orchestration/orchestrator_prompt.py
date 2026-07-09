@@ -27,6 +27,10 @@ You receive a JSON object with these fields:
 - agent_summary: one-line description per available agent role
 - repo_map: a high-level index of the repository — per-directory one-line summaries and,
   for each file, its top-level symbols (functions/classes/methods) with approximate line ranges
+- unstall_task_id: null in the ordinary case. When set, a human has reviewed that specific
+  task's stalled recovery chain and explicitly authorized one recovery attempt beyond the normal
+  max_recovery_depth limit for it — see Recovery rules below. Every other task's lineage is still
+  held to the normal limit.
 
 ## Output
 
@@ -161,7 +165,11 @@ When either condition holds:
 - Create a recovery NewTask with recovery_for set to the failed task's task_id
 - Set lineage_depth = failed_task.lineage_depth + 1
 
-Never create a recovery task if lineage_depth >= {max_recovery_depth}.
+Never create a recovery task if lineage_depth >= {max_recovery_depth}, UNLESS that task's id
+equals unstall_task_id in the input — in that one case, a recovery task may be created even at
+lineage_depth == {max_recovery_depth} (but no further; the exemption is for one attempt only, not
+an unlimited lift). The normal eligibility requirement still applies even when unstalled: only
+create the recovery task if verdict.infeasible is true or a new comment exists for it.
 
 A task with status "awaiting_merge" is never eligible for recovery and never needs one — it
 already passed review and is sitting in an open, approved PR; only a merge action is pending, not

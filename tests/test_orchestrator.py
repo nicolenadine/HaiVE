@@ -108,6 +108,7 @@ def _make_input(
     tasks: list[OrchestratorTaskView] | None = None,
     comments: list[TaskComment] | None = None,
     repo_map: str = "",
+    unstall_task_id: str | None = None,
 ) -> OrchestratorInput:
     return OrchestratorInput(
         project=_PROJECT,
@@ -115,6 +116,7 @@ def _make_input(
         new_comments=comments or [],
         agent_summary="implementation_agent: writes code",
         repo_map=repo_map,
+        unstall_task_id=unstall_task_id,
     )
 
 
@@ -292,6 +294,38 @@ class TestOrchestratorRunLoop:
         with pytest.raises(OrchestratorStalledError) as exc_info:
             orch.run_loop(_make_input(tasks=tasks))
         assert exc_info.value.stalled_task_id == "42"
+
+    def test_unstall_task_id_allows_one_recovery_past_max_depth(self):
+        # A human has reviewed task 42's stalled chain and re-run with
+        # --unstall 42 — this specific lineage gets one attempt beyond the
+        # normal cap; the recovery must go through, not raise.
+        recovery = _make_new_task(recovery_for="42", lineage_depth=4)
+        client = _mock_client(_output_json(new_tasks=[recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("42", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=3)]
+        result = orch.run_loop(_make_input(tasks=tasks, unstall_task_id="42"))
+        assert result.new_tasks[0].recovery_for == "42"
+
+    def test_unstall_task_id_exemption_is_one_attempt_only(self):
+        # The exemption lifts the cap by exactly one level — it is not an
+        # unlimited lift for that lineage.
+        recovery = _make_new_task(recovery_for="42", lineage_depth=5)
+        client = _mock_client(_output_json(new_tasks=[recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("42", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=4)]
+        with pytest.raises(OrchestratorStalledError):
+            orch.run_loop(_make_input(tasks=tasks, unstall_task_id="42"))
+
+    def test_unstall_task_id_does_not_exempt_other_lineages(self):
+        # Exempting task 42 must not accidentally lift the cap for an
+        # unrelated task's own maxed-out recovery chain.
+        bad_recovery = _make_new_task(recovery_for="99", lineage_depth=4)
+        client = _mock_client(_output_json(new_tasks=[bad_recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("99", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=3)]
+        with pytest.raises(OrchestratorStalledError) as exc_info:
+            orch.run_loop(_make_input(tasks=tasks, unstall_task_id="42"))
+        assert exc_info.value.stalled_task_id == "99"
 
     def test_done_true_signals_completion(self):
         client = _mock_client(_output_json(done=True))
