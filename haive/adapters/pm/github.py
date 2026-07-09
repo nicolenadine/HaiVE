@@ -284,6 +284,19 @@ class GitHubPMAdapter:
         """
         self._repo_obj.get_milestone(int(project_id)).edit(state="closed")
 
+    def close_completed_tasks(self, project_id: str) -> None:
+        """Close the GitHub issue for every COMPLETE task in this milestone.
+
+        Called once as part of end-of-milestone cleanup (see
+        close_milestone()), not per-task as each one finishes — by the time
+        a milestone is done, no further scheduling happens against it, so
+        there's no risk of a still-open dependency lookup needing one of
+        these issues to still be open.
+        """
+        for task in self.get_tasks(project_id):
+            if task.status == TaskStatus.COMPLETE:
+                self._repo_obj.get_issue(int(task.task_id)).edit(state="closed")
+
     def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
         """Project-board items belonging to this milestone.
 
@@ -450,12 +463,6 @@ class GitHubPMAdapter:
         self._update_field(item_id, "Status", {
             "singleSelectOptionId": self._status_option_ids[status.value],
         })
-        if status == TaskStatus.COMPLETE:
-            # COMPLETE is the only status haive itself ever sets that means
-            # "genuinely finished" — closing the issue here (not just the
-            # board's Status field) keeps GitHub's own open/closed state in
-            # sync, the same way close_milestone() does for milestones.
-            self._repo_obj.get_issue(int(task_id)).edit(state="closed")
 
     def add_comment(self, task_id: str, body: str) -> None:
         self._repo_obj.get_issue(int(task_id)).create_comment(body)

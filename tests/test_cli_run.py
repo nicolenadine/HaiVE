@@ -302,6 +302,16 @@ class TestRunDoneTrue:
         _run_with_mocks(m)
         m["pm"].close_milestone.assert_called_once_with("42")
 
+    def test_done_true_with_nothing_ahead_closes_completed_tasks(self):
+        # End-of-milestone cleanup closes every completed task's issue too,
+        # not just the milestone itself — done once here, not per-task as
+        # each one finishes.
+        m = _base_mocks()
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = False
+        _run_with_mocks(m)
+        m["pm"].close_completed_tasks.assert_called_once_with("42")
+
     def test_done_true_gated_final_pr_does_not_close_milestone(self):
         # haive run never auto-merges its own final PR (auto_merge_final_pr
         # is always False) — the milestone isn't actually done until a human
@@ -311,6 +321,7 @@ class TestRunDoneTrue:
         result = _run_with_mocks(m)
         assert result.exit_code == 0
         m["pm"].close_milestone.assert_not_called()
+        m["pm"].close_completed_tasks.assert_not_called()
 
 
 class TestRunProjectBranch:
@@ -710,6 +721,8 @@ class TestRunAll:
 
         closed_ids = [c.args[0] for c in m["pm"].close_milestone.call_args_list]
         assert closed_ids == ["5", "6"]
+        closed_task_ids = [c.args[0] for c in m["pm"].close_completed_tasks.call_args_list]
+        assert closed_task_ids == ["5", "6"]
 
     def test_gated_milestone_awaiting_merge_is_not_closed(self):
         m = _base_mocks()
@@ -722,6 +735,7 @@ class TestRunAll:
         _run_all_with_mocks(m, milestones=milestones)
 
         m["pm"].close_milestone.assert_not_called()
+        m["pm"].close_completed_tasks.assert_not_called()
 
     def test_no_merge_overrides_checkpoint_false(self):
         m = _base_mocks()

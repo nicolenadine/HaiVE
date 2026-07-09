@@ -266,6 +266,39 @@ class TestCloseMilestone:
 
 
 # ---------------------------------------------------------------------------
+# TestCloseCompletedTasks
+# ---------------------------------------------------------------------------
+
+class TestCloseCompletedTasks:
+    def test_closes_only_complete_tasks(self):
+        adapter = _make_adapter()
+        adapter.get_tasks = MagicMock(return_value=[
+            MagicMock(task_id="10", status=TaskStatus.COMPLETE),
+            MagicMock(task_id="11", status=TaskStatus.BLOCKED),
+            MagicMock(task_id="12", status=TaskStatus.COMPLETE),
+        ])
+        issues = {10: MagicMock(), 11: MagicMock(), 12: MagicMock()}
+        adapter._repo_obj.get_issue.side_effect = lambda n: issues[n]
+
+        adapter.close_completed_tasks("7")
+
+        adapter.get_tasks.assert_called_once_with("7")
+        issues[10].edit.assert_called_once_with(state="closed")
+        issues[11].edit.assert_not_called()
+        issues[12].edit.assert_called_once_with(state="closed")
+
+    def test_no_complete_tasks_closes_nothing(self):
+        adapter = _make_adapter()
+        adapter.get_tasks = MagicMock(return_value=[
+            MagicMock(task_id="10", status=TaskStatus.PENDING),
+        ])
+
+        adapter.close_completed_tasks("7")
+
+        adapter._repo_obj.get_issue.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # TestGetTasks
 # ---------------------------------------------------------------------------
 
@@ -713,30 +746,6 @@ class TestUpdateStatus:
             adapter.update_status("1", status)
             call_vars = adapter._graphql.call_args[0][1]
             assert call_vars["value"] == {"singleSelectOptionId": f"OPT_{status.value}"}
-
-    def test_complete_status_closes_the_issue(self):
-        adapter = _make_adapter()
-        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
-        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
-        issue = MagicMock()
-        adapter._repo_obj.get_issue.return_value = issue
-
-        adapter.update_status("42", TaskStatus.COMPLETE)
-
-        adapter._repo_obj.get_issue.assert_called_once_with(42)
-        issue.edit.assert_called_once_with(state="closed")
-
-    def test_non_complete_statuses_do_not_close_the_issue(self):
-        adapter = _make_adapter()
-        adapter._get_project_item_id = MagicMock(return_value="PVTI_item1")
-        adapter._graphql.return_value = {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}
-
-        for status in TaskStatus:
-            if status == TaskStatus.COMPLETE:
-                continue
-            adapter._repo_obj.get_issue.reset_mock()
-            adapter.update_status("1", status)
-            adapter._repo_obj.get_issue.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

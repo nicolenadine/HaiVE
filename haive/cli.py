@@ -697,6 +697,7 @@ def _run_milestone(
                                 try:
                                     vcs.merge_pr(pr_id)
                                     typer.echo("Final PR merged automatically (milestone checkpoint disabled).")
+                                    pm.close_completed_tasks(milestone_id)
                                     pm.close_milestone(milestone_id)
                                     return MilestoneRunOutcome.DONE_MERGED
                                 except RuntimeError as exc:
@@ -708,6 +709,7 @@ def _run_milestone(
                                 "\nProject complete. All changes were already merged into main "
                                 "— nothing further to merge."
                             )
+                            pm.close_completed_tasks(milestone_id)
                             pm.close_milestone(milestone_id)
                             return MilestoneRunOutcome.DONE_MERGED
 
