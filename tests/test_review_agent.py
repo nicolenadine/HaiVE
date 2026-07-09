@@ -74,7 +74,7 @@ class TestVerdictContent:
     def test_passing_output_returns_passed_verdict(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.return_value = make_turn(PASSING_PAYLOAD)
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.passed is True
         assert verdict.uncertain is False
         assert verdict.suggestions == []
@@ -82,7 +82,7 @@ class TestVerdictContent:
     def test_failing_output_returns_failed_verdict_with_suggestions(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.return_value = make_turn(FAILING_PAYLOAD)
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.passed is False
         assert verdict.uncertain is False
         assert len(verdict.suggestions) > 0
@@ -90,7 +90,7 @@ class TestVerdictContent:
     def test_failing_verdict_suggestions_come_from_findings(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.return_value = make_turn(FAILING_PAYLOAD)
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert "Add retry decorator" in verdict.suggestions
 
 
@@ -103,14 +103,14 @@ class TestModelEscalation:
             make_turn(UNCERTAIN_PAYLOAD),
             make_turn(PASSING_PAYLOAD),
         ]
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert client.call_single.call_count == 2
         assert verdict.passed is True
 
     def test_all_uncertain_defaults_to_failed(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.side_effect = [make_turn(UNCERTAIN_PAYLOAD)] * len(REVIEWER_MODELS)
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert client.call_single.call_count == len(REVIEWER_MODELS)
         assert verdict.passed is False
         assert verdict.uncertain is False
@@ -118,7 +118,7 @@ class TestModelEscalation:
     def test_uncertain_does_not_set_uncertain_on_final_verdict(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.side_effect = [make_turn(UNCERTAIN_PAYLOAD)] * len(REVIEWER_MODELS)
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.uncertain is False
 
     def test_all_models_fail_schema_validation_returns_fallback_with_raw_excerpt(self):
@@ -133,7 +133,7 @@ class TestModelEscalation:
         client.call_single.side_effect = [
             AgenticTurn(tool_calls=[], content=truncated, model_used=m) for m in REVIEWER_MODELS
         ]
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.passed is False
         assert "Reviewer failed to produce a valid output after all model attempts" in verdict.reason
         assert truncated[:50] in verdict.reason
@@ -146,7 +146,7 @@ class TestModelEscalation:
             "findings": [], "summary": "architecturally impossible",
         }
         client.call_single.return_value = make_turn(infeasible_payload)
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert client.call_single.call_count == 1
         assert verdict.infeasible is True
         assert verdict.passed is False
@@ -157,7 +157,7 @@ class TestModelEscalation:
             AgenticTurn(tool_calls=[], content="not json", model_used="mock"),
             make_turn(PASSING_PAYLOAD),
         ]
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.passed is True
 
 
@@ -171,6 +171,7 @@ class TestPromptContent:
             loaded_sections=[],
             discovery_status="found",
             discovery_note="",
+            original_contents={},
         )
         make_agent(client).review(**(defaults | review_kwargs))
         return client.call_single.call_args.kwargs["messages"]
@@ -228,34 +229,52 @@ class TestPromptContent:
         assert "haive/client.py" in prompt
         assert "class Client: pass" in prompt
 
-    def test_original_file_content_included_for_edited_path(self, tmp_path):
-        (tmp_path / "haive").mkdir()
-        (tmp_path / "haive" / "client.py").write_text("class Client:\n    def old_method(self): pass\n")
+    def test_execution_summary_included_in_prompt(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.return_value = make_turn(PASSING_PAYLOAD)
-        make_agent(client, root=str(tmp_path)).review(
+        prompt = self._captured_prompt(
+            client, execution_summary="Syntax: OK. Imports: OK. `pytest -q`: exit 0. 219 passed."
+        )
+        assert "Execution Verification" in prompt
+        assert "219 passed" in prompt
+
+    def test_no_execution_verification_section_when_summary_empty(self):
+        client = MagicMock(spec=ModelClient)
+        client.call_single.return_value = make_turn(PASSING_PAYLOAD)
+        prompt = self._captured_prompt(client)  # default execution_summary=""
+        assert "Execution Verification" not in prompt
+
+    def test_original_file_content_included_for_edited_path(self):
+        # original_contents is supplied by the caller (TaskExecutor, which
+        # captures it once per task before any attempt writes to disk) —
+        # ReviewAgent no longer reads it from disk itself.
+        client = MagicMock(spec=ModelClient)
+        client.call_single.return_value = make_turn(PASSING_PAYLOAD)
+        make_agent(client).review(
             make_task(), make_agent_output(), [], "found", "",
+            original_contents={"haive/client.py": "class Client:\n    def old_method(self): pass\n"},
         )
         messages = client.call_single.call_args.kwargs["messages"]
         prompt = next(m["content"] for m in messages if m["role"] == "user")
         assert "Original File Content" in prompt
         assert "old_method" in prompt
 
-    def test_no_original_file_section_when_file_does_not_exist_yet(self):
+    def test_no_original_file_section_when_original_contents_empty(self):
         client = MagicMock(spec=ModelClient)
         client.call_single.return_value = make_turn(PASSING_PAYLOAD)
-        prompt = self._captured_prompt(client)  # default root="/tmp", file doesn't exist
+        prompt = self._captured_prompt(client)  # default original_contents={}
         assert "Original File Content" not in prompt
 
-    def test_scaffold_new_files_have_no_original_content(self, tmp_path):
+    def test_scaffold_new_files_have_no_original_content(self):
         from haive.models.agent_output import FileToCreate, ScaffoldAgentOutput
         client = MagicMock(spec=ModelClient)
         client.call_single.return_value = make_turn(PASSING_PAYLOAD)
         scaffold_output = ScaffoldAgentOutput(
             files=[FileToCreate(path="haive/new_module.py", content="x = 1")], notes="",
         )
-        make_agent(client, root=str(tmp_path)).review(
+        make_agent(client).review(
             make_task(), scaffold_output, [], "empty_expected", "",
+            original_contents={},
         )
         messages = client.call_single.call_args.kwargs["messages"]
         prompt = next(m["content"] for m in messages if m["role"] == "user")
@@ -345,7 +364,7 @@ class TestReadFileToolIntegration:
             make_turn(PASSING_PAYLOAD),
         ]
         verdict = make_agent(client, root=str(tmp_path)).review(
-            make_task(), make_agent_output(), [], "found", ""
+            make_task(), make_agent_output(), [], "found", "", original_contents={}
         )
         assert client.call_single.call_count == 2
         assert verdict.passed is True
@@ -359,7 +378,7 @@ class TestReadFileToolIntegration:
             make_turn(PASSING_PAYLOAD),
         ]
         verdict = make_agent(client, root=str(tmp_path)).review(
-            make_task(), make_agent_output(), [], "found", ""
+            make_task(), make_agent_output(), [], "found", "", original_contents={}
         )
         assert verdict.passed is True
         second_messages = client.call_single.call_args_list[1].kwargs["messages"]
@@ -371,7 +390,7 @@ class TestReadFileToolIntegration:
             make_turn(UNCERTAIN_PAYLOAD),
             make_turn(PASSING_PAYLOAD),
         ]
-        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "")
+        verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert client.call_single.call_count == 2
         assert verdict.passed is True
         first_messages = client.call_single.call_args_list[0].kwargs["messages"]

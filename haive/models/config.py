@@ -46,8 +46,21 @@ class Settings(BaseSettings):
     # Review agent
     reviewer_models: list[str] = Field(default=["anthropic/claude-sonnet-4-6", "openai/gpt-4o"])
 
+    # Execution verification — cheap, deterministic checks (path safety, syntax,
+    # import, configured commands) run before the reviewer is called. Commands
+    # come only from verification_commands, never from LLM output. Empty list
+    # auto-detects a tests/ directory in the target project and defaults to
+    # ["python -m pytest -q"] if found, else runs no commands (path/syntax/
+    # import checks still run regardless).
+    verification_enabled: bool = True
+    verification_commands: list[str] = Field(default_factory=list)
+    verification_skip_roles: list[AgentRole] = Field(default=[AgentRole.DOCUMENTATION_WRITER_AGENT])
+    verification_import_timeout_seconds: int = 30
+    verification_command_timeout_seconds: int = 120
+
     # Recovery
     max_recovery_depth: int = 3
+    max_family_attempts: int = 15
 
     # Autonomous run loop
     max_waves_per_run: int = 2

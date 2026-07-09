@@ -9,7 +9,10 @@ from haive.adapters.pm.base import PMAdapter
 from haive.adapters.vcs.base import VCSAdapter
 from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
 from haive.discovery.file_index_service import FileIndexService
+from haive.discovery.git_utils import get_changed_files
+from haive.discovery.path_safety import resolve_within_root
 from haive.execution.context_assembler import ContextAssembler
+from haive.execution.execution_verifier import ExecutionVerifier
 from haive.execution.output_validator import OutputValidationError, OutputValidator
 from haive.execution.read_file_tool import run_tool_loop
 from haive.execution.review_agent import ReviewAgent
@@ -54,6 +57,7 @@ class TaskExecutor:
         model_client: ModelClient,
         tier_config: TierConfig,
         review_agent: ReviewAgent,
+        execution_verifier: ExecutionVerifier,
         root: str,
         project_branch: str,
         auto_merge: bool = True,
@@ -62,6 +66,7 @@ class TaskExecutor:
         self._model_client = model_client
         self._tier_config = tier_config
         self._review_agent = review_agent
+        self._execution_verifier = execution_verifier
         self._root = root
         self._project_branch = project_branch
         self._auto_merge = auto_merge
@@ -116,6 +121,12 @@ class TaskExecutor:
         record = TaskExecutionRecord(task_id=task.task_id, executor_start=_utcnow())
         attempt_num = 0
         retry_feedback: list[str] = []
+        # Captured once per task, the first time any attempt is about to write
+        # a given path — not re-read from disk on every attempt, since disk
+        # holds each attempt's own tentative edits once execution verification
+        # needs them materialized (see below). Re-reading later would start
+        # showing a rejected attempt's own edit back as "original".
+        original_contents: dict[str, str] = {}
 
         pm.update_status(task.task_id, TaskStatus.IN_PROGRESS)
 
@@ -214,6 +225,35 @@ class TaskExecutor:
                             retry_feedback = [shrinkage_reason]
                             continue
 
+                        # Capture pre-task content for any path this attempt is
+                        # about to write, before writing it — the reviewer's
+                        # "original" baseline must never be a rejected attempt's
+                        # own tentative edit.
+                        for path_str in _edited_paths(agent_output):
+                            if path_str in original_contents:
+                                continue
+                            safe = resolve_within_root(path_str, self._root)
+                            if safe is not None and safe.is_file():
+                                original_contents[path_str] = safe.read_text(encoding="utf-8")
+
+                        _apply_output(agent_output, self._root)
+                        real_changed_files = get_changed_files(self._root)
+
+                        exec_result = self._execution_verifier.verify(real_changed_files, task.agent_role)
+                        if not exec_result.passed:
+                            self._on_status(f"  [#{task.task_id}] execution check failed ({exec_result.stage}) — retrying")
+                            record.attempt_log.append(
+                                AttemptLogEntry(
+                                    tier=complexity,
+                                    attempt=attempt_num,
+                                    reason=f"Execution check ({exec_result.stage}): {exec_result.detail}",
+                                    command_results=exec_result.results,
+                                )
+                            )
+                            retry_feedback = [exec_result.detail]
+                            vcs.reset_working_tree(task_branch)
+                            continue
+
                         self._on_status(f"  [#{task.task_id}] reviewing output  [{result.model_used}]")
                         verdict = self._review_agent.review(
                             task=task,
@@ -221,6 +261,8 @@ class TaskExecutor:
                             loaded_sections=loaded_sections,
                             discovery_status=discovery_status,
                             discovery_note=discovery_note,
+                            original_contents=original_contents,
+                            execution_summary=exec_result.summary,
                         )
 
                         if verdict.passed:
@@ -229,9 +271,9 @@ class TaskExecutor:
                                 task=task,
                                 project_id=project_id,
                                 record=record,
-                                agent_output=agent_output,
                                 verdict=verdict,
                                 task_branch=task_branch,
+                                changed_files=real_changed_files,
                                 attempt_num=attempt_num,
                                 complexity=complexity,
                                 response_model=result.model_used,
@@ -249,6 +291,7 @@ class TaskExecutor:
                                     tier=complexity,
                                     attempt=attempt_num,
                                     reason=verdict.reason,
+                                    command_results=exec_result.results,
                                 )
                             )
                             record.verdict = verdict.to_summary()
@@ -257,6 +300,7 @@ class TaskExecutor:
                             record.total_attempts = attempt_num
                             record.executor_end = _utcnow()
                             state_store.merge_task_record(project_id, task.task_id, record)
+                            vcs.reset_working_tree(task_branch)
                             return record
 
                         self._on_status(f"  [#{task.task_id}] review failed — {verdict.reason}")
@@ -268,9 +312,11 @@ class TaskExecutor:
                                 tier=complexity,
                                 attempt=attempt_num,
                                 reason=verdict.reason,
+                                command_results=exec_result.results,
                             )
                         )
                         retry_feedback = verdict.suggestions
+                        vcs.reset_working_tree(task_branch)
 
                 # All tiers exhausted
                 self._on_status(f"  [#{task.task_id}] all tiers exhausted — needs human review")
@@ -301,9 +347,9 @@ class TaskExecutor:
         task: Task,
         project_id: str,
         record: TaskExecutionRecord,
-        agent_output: object,
         verdict: ReviewVerdict,
         task_branch: str,
+        changed_files: list[str],
         attempt_num: int,
         complexity: Complexity,
         response_model: str,
@@ -314,12 +360,11 @@ class TaskExecutor:
         state_store: StateStore,
     ) -> TaskExecutionRecord:
         # create_branch() already checked the local working directory out onto
-        # task_branch (in _run_inner, before this method runs). _run_inner's
-        # own try/finally guarantees the local repo gets back to project_branch
-        # regardless of what happens here.
-        task_changed_files = _apply_output(agent_output, self._root)
-        agent_md_touched = file_index.update_after_task(task_changed_files, self._root)
-        changed_files = sorted(set(task_changed_files) | set(agent_md_touched))
+        # task_branch (in _run_inner, before this method runs), and the
+        # passing attempt's edits are already on disk (applied and verified
+        # before review, in _run_inner) — nothing left to write here.
+        agent_md_touched = file_index.update_after_task(changed_files, self._root)
+        changed_files = sorted(set(changed_files) | set(agent_md_touched))
         self._on_status(f"  [#{task.task_id}] pushing {len(changed_files)} file(s): {', '.join(changed_files)}")
         vcs.push_commits(
             task_branch,
@@ -440,6 +485,12 @@ def _check_for_catastrophic_deletion(agent_output: object, root: str) -> str | N
                 "everything not being intentionally changed or removed."
             )
     return None
+
+
+def _edited_paths(agent_output: object) -> list[str]:
+    if isinstance(agent_output, ScaffoldAgentOutput):
+        return [f.path for f in agent_output.files]
+    return [e.path for e in agent_output.edits]  # type: ignore[attr-defined]
 
 
 def _apply_output(agent_output: object, root: str) -> list[str]:

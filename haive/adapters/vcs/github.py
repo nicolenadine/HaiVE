@@ -222,3 +222,23 @@ class GitHubVCSAdapter:
         project PR, rather than reactively parsing a GitHub error message.
         """
         return self._repo_obj.compare(base_branch, head_branch).ahead_by > 0
+
+    def reset_working_tree(self, branch: str) -> None:
+        """Discard uncommitted changes and untracked files on branch, so a
+        rejected attempt's tentative edits never leak into the next one's
+        discovery/context. Assumes branch is already checked out (matches
+        create_branch()'s existing local-checkout side effect).
+        """
+        try:
+            subprocess.run(
+                ["git", "checkout", "--", "."],
+                check=True, capture_output=True, timeout=30,
+            )
+            subprocess.run(
+                ["git", "clean", "-fd"],
+                check=True, capture_output=True, timeout=30,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"git command failed: {e.cmd}\nstdout: {e.stdout}\nstderr: {e.stderr}"
+            ) from e

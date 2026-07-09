@@ -592,6 +592,8 @@ def _run_milestone(
     from haive.adapters.vcs.github import GitHubVCSAdapter
     from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
     from haive.discovery.file_index_service import FileIndexService
+    from haive.execution.command_runner import CommandRunner
+    from haive.execution.execution_verifier import ExecutionVerifier
     from haive.execution.review_agent import ReviewAgent
     from haive.execution.task_executor import TaskExecutor
     from haive.llm.errors import APIError
@@ -670,8 +672,21 @@ def _run_milestone(
             (p.read_text(encoding="utf-8") for p in guidelines_candidates if p.exists()), ""
         )
         review_agent = ReviewAgent(model_client, reviewer_system_prompt, guidelines, root)
+        command_runner = CommandRunner(
+            secrets_to_redact=[
+                settings.github_token, settings.anthropic_api_key, settings.openai_api_key,
+            ]
+        )
+        execution_verifier = ExecutionVerifier(
+            command_runner, root,
+            verification_commands=settings.verification_commands,
+            skip_roles=settings.verification_skip_roles,
+            import_timeout_seconds=settings.verification_import_timeout_seconds,
+            command_timeout_seconds=settings.verification_command_timeout_seconds,
+            enabled=settings.verification_enabled,
+        )
         executor = TaskExecutor(
-            model_client, tier_config, review_agent, root, project_branch,
+            model_client, tier_config, review_agent, execution_verifier, root, project_branch,
             auto_merge=settings.auto_merge,
             on_status=typer.echo,
         )
@@ -808,7 +823,10 @@ def _run_milestone(
                                 "max_recovery_depth for this run."
                             )
                         typer.echo("Calling orchestrator...")
-                    orchestrator = Orchestrator(model_client, tier_config, settings.max_recovery_depth, example_library)
+                    orchestrator = Orchestrator(
+                        model_client, tier_config, settings.max_recovery_depth,
+                        settings.max_family_attempts, example_library,
+                    )
                     try:
                         output = orchestrator.run_loop(orch_input)
                     except OrchestratorStalledError as e:

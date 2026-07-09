@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from haive.execution.execution_verifier import ExecutionCheckResult, ExecutionVerifier
 from haive.execution.output_validator import OutputValidationError
 from haive.execution.review_agent import ReviewAgent
 from haive.execution.task_executor import TaskExecutor, _apply_output
@@ -93,6 +95,24 @@ def make_infeasible_review(reason: str = "Callback structurally never receives t
     return ReviewVerdict(passed=False, infeasible=True, reason=reason, suggestions=[])
 
 
+def make_passing_execution_check() -> ExecutionCheckResult:
+    return ExecutionCheckResult(passed=True, stage=None, summary="", detail="")
+
+
+def _init_git_repo(root) -> None:
+    """A real git repo so get_changed_files (real `git diff`/`git status`,
+    called by _run_inner before review) has something valid to run against —
+    task_executor now applies edits to disk before review, not only after.
+    """
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "Test"],
+        ["git", "commit", "--allow-empty", "-q", "-m", "initial"],
+    ):
+        subprocess.run(cmd, cwd=root, check=True, capture_output=True)
+
+
 def make_discovery_result(*, has_sections: bool = False) -> DiscoveryResult:
     sections = (
         [DiscoveredSection(file="haive/client.py", symbol=None, start_line=None, end_line=None, full=True, reason="Core.")]
@@ -105,10 +125,14 @@ def make_discovery_result(*, has_sections: bool = False) -> DiscoveryResult:
 def make_executor(
     tmp_path, *, low_attempts: int = 2, medium_attempts: int = 2, auto_merge: bool = True
 ) -> TaskExecutor:
+    _init_git_repo(tmp_path)
+    execution_verifier = MagicMock(spec=ExecutionVerifier)
+    execution_verifier.verify.return_value = make_passing_execution_check()
     return TaskExecutor(
         model_client=MagicMock(spec=ModelClient),
         tier_config=make_tier_config(low_attempts, medium_attempts),
         review_agent=MagicMock(spec=ReviewAgent),
+        execution_verifier=execution_verifier,
         root=str(tmp_path),
         project_branch="main",
         auto_merge=auto_merge,
@@ -121,6 +145,13 @@ def make_services(tmp_path):
     prompt_path = tmp_path / "prompts" / "implementation_agent.md"
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text("You are an implementation agent.")
+    # Commit this fixture file as the repo's baseline — get_changed_files
+    # (real git diff/status) must only see what the executor itself writes
+    # during the test, not test setup scaffolding.
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "fixtures"], cwd=tmp_path, check=True, capture_output=True
+    )
 
     registry = MagicMock()
     registry.get_agent.return_value = make_agent_config(system_prompt=str(prompt_path))
@@ -470,6 +501,129 @@ class TestCatastrophicDeletionCheck:
 
         assert record.total_attempts == 1
         executor._review_agent.review.assert_called_once()
+
+
+# ── execution verification ────────────────────────────────────────────────────
+
+class TestExecutionVerification:
+    def test_failing_execution_check_skips_the_reviewer(self, tmp_path):
+        # The core cost-saving guarantee: a submission that fails cheap,
+        # deterministic checks must never reach the expensive LLM reviewer.
+        executor = make_executor(tmp_path, low_attempts=2)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.return_value = make_editor_turn()
+        executor._execution_verifier.verify.side_effect = [
+            ExecutionCheckResult(
+                passed=False, stage="import", summary="", detail="ModuleNotFoundError: no module named x",
+            ),
+            make_passing_execution_check(),
+        ]
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        record = executor.run(make_task(), **svc)
+
+        assert executor._review_agent.review.call_count == 1
+        assert record.total_attempts == 2
+        exec_entries = [e for e in record.attempt_log if "Execution check" in e.reason]
+        assert len(exec_entries) == 1
+        assert "ModuleNotFoundError" in exec_entries[0].reason
+
+    def test_failing_execution_check_resets_the_working_tree(self, tmp_path):
+        executor = make_executor(tmp_path, low_attempts=2)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.return_value = make_editor_turn()
+        executor._execution_verifier.verify.side_effect = [
+            ExecutionCheckResult(passed=False, stage="syntax", summary="", detail="bad syntax"),
+            make_passing_execution_check(),
+        ]
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        executor.run(make_task(), **svc)
+
+        svc["vcs"].reset_working_tree.assert_any_call("haive/task-42")
+
+    def test_passing_execution_check_result_flows_into_review_call(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.return_value = make_editor_turn()
+        executor._execution_verifier.verify.return_value = ExecutionCheckResult(
+            passed=True, stage=None, summary="Syntax: OK. Imports: OK.", detail="",
+        )
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        executor.run(make_task(), **svc)
+
+        call_kwargs = executor._review_agent.review.call_args.kwargs
+        assert call_kwargs["execution_summary"] == "Syntax: OK. Imports: OK."
+        assert call_kwargs["original_contents"] == {}
+
+    def test_normal_review_failure_resets_the_working_tree(self, tmp_path):
+        executor = make_executor(tmp_path, low_attempts=2)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.return_value = make_editor_turn()
+        executor._review_agent.review.side_effect = [
+            make_failing_review(["fix it"]),
+            make_passing_review(),
+        ]
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        executor.run(make_task(), **svc)
+
+        svc["vcs"].reset_working_tree.assert_any_call("haive/task-42")
+
+    def test_infeasible_verdict_resets_the_working_tree(self, tmp_path):
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.return_value = make_editor_turn()
+        executor._review_agent.review.return_value = make_infeasible_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+
+        executor.run(make_task(), **svc)
+
+        svc["vcs"].reset_working_tree.assert_called_once_with("haive/task-42")
+
+    def test_original_contents_preserved_across_a_rejected_attempt(self, tmp_path):
+        # The reviewer's "original" baseline must reflect state before ANY
+        # attempt this task made — not a rejected attempt's own tentative
+        # edit, which would already be on disk by the time a later attempt
+        # (re-)writes the same path.
+        (tmp_path / "haive").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "haive" / "client.py").write_text("class Client:\n    original = True\n")
+        executor = make_executor(tmp_path, low_attempts=2)
+        svc = make_services(tmp_path)
+
+        executor._model_client.call_single.return_value = make_editor_turn()
+        executor._review_agent.review.side_effect = [
+            make_failing_review(["fix it"]),
+            make_passing_review(),
+        ]
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        executor.run(make_task(), **svc)
+
+        first_call_originals = executor._review_agent.review.call_args_list[0].kwargs["original_contents"]
+        second_call_originals = executor._review_agent.review.call_args_list[1].kwargs["original_contents"]
+        assert first_call_originals["haive/client.py"] == "class Client:\n    original = True\n"
+        assert second_call_originals["haive/client.py"] == "class Client:\n    original = True\n"
 
 
 # ── tier escalation ───────────────────────────────────────────────────────────

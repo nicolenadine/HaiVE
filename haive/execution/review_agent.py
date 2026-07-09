@@ -4,12 +4,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from haive.discovery.path_safety import resolve_within_root
 from haive.execution.output_validator import OutputValidationError, OutputValidator
 from haive.execution.read_file_tool import run_tool_loop
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
-from haive.models.agent_output import ReviewAgentOutput, ScaffoldAgentOutput
+from haive.models.agent_output import ReviewAgentOutput
 from haive.models.discovery import LoadedSection
 from haive.models.enums import AgentRole
 from haive.models.review import ReviewVerdict
@@ -69,8 +68,13 @@ class ReviewAgent:
         loaded_sections: list[LoadedSection],
         discovery_status: Literal["found", "empty_expected", "empty_unexpected"],
         discovery_note: str,
+        original_contents: dict[str, str],
+        execution_summary: str = "",
     ) -> ReviewVerdict:
-        prompt = self._build_prompt(task, agent_output, loaded_sections, discovery_status, discovery_note)
+        prompt = self._build_prompt(
+            task, agent_output, loaded_sections, discovery_status, discovery_note,
+            original_contents, execution_summary,
+        )
         messages: list[dict] = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": prompt},
@@ -118,27 +122,6 @@ class ReviewAgent:
             suggestions=["Manual review required."],
         )
 
-    def _read_original_contents(self, agent_output: BaseModel) -> dict[str, str]:
-        """Read the current on-disk content of every file the submission edits.
-
-        Gives the reviewer real ground truth to diff the proposal against,
-        independent of whatever loaded_sections happened to include — closes
-        the blind spot where the reviewer's only view of "the original" was
-        the same (possibly truncated) context the code editor saw.
-        """
-        result: dict[str, str] = {}
-        for path_str in self._edited_paths(agent_output):
-            safe = resolve_within_root(path_str, self._root)
-            if safe is not None and safe.is_file():
-                result[path_str] = safe.read_text(encoding="utf-8")
-        return result
-
-    @staticmethod
-    def _edited_paths(agent_output: BaseModel) -> list[str]:
-        if isinstance(agent_output, ScaffoldAgentOutput):
-            return [f.path for f in agent_output.files]
-        return [e.path for e in agent_output.edits]  # type: ignore[attr-defined]
-
     # ── prompt building ───────────────────────────────────────────────────────
 
     def _build_prompt(
@@ -148,6 +131,8 @@ class ReviewAgent:
         loaded_sections: list[LoadedSection],
         discovery_status: Literal["found", "empty_expected", "empty_unexpected"],
         discovery_note: str,
+        original_contents: dict[str, str],
+        execution_summary: str,
     ) -> str:
         parts: list[str] = []
 
@@ -163,16 +148,24 @@ class ReviewAgent:
             for s in loaded_sections:
                 parts.append(f"### {s.file}\n\n{s.reason}\n\n```\n{s.source.rstrip()}\n```")
 
-        original_contents = self._read_original_contents(agent_output)
         if original_contents:
             parts.append(
-                "\n## Original File Content (full, current on-disk state before this edit)\n"
+                "\n## Original File Content (full state before this task's own edits)\n"
             )
             for path, content in original_contents.items():
                 parts.append(f"### {path}\n\n```\n{content.rstrip()}\n```")
 
         parts.append("\n## Agent Output\n")
         parts.append(f"```json\n{agent_output.model_dump_json(indent=2)}\n```")
+
+        if execution_summary:
+            parts.append("\n## Execution Verification\n")
+            parts.append(
+                "This submission was already applied to disk and passed cheap, deterministic "
+                "checks (syntax, imports, and any configured project commands) before reaching "
+                "you. Treat this as real, factual evidence — not a claim to re-verify from "
+                f"reading code alone:\n\n{execution_summary}"
+            )
 
         parts.append("\n## Guidelines\n")
         parts.append(self._guidelines.strip())

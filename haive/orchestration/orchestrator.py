@@ -33,11 +33,13 @@ class Orchestrator:
         model_client: ModelClient,
         tier_config: TierConfig,
         max_recovery_depth: int,
+        max_family_attempts: int,
         example_library: ExampleLibrary | None = None,
     ) -> None:
         self._model_client = model_client
         self._tier_config = tier_config
         self._max_recovery_depth = max_recovery_depth
+        self._max_family_attempts = max_family_attempts
         self._example_library = example_library
 
     def run_loop(self, input: OrchestratorInput) -> OrchestratorOutput:
@@ -78,16 +80,47 @@ class Orchestrator:
             )
 
         task_depth = {view.task_id: view.lineage_depth for view in input.tasks}
+        task_by_id = {view.task_id: view for view in input.tasks}
+        corrected_new_tasks: list = []
         for new_task in output.new_tasks:
             if new_task.recovery_for is not None:
                 source_depth = task_depth.get(new_task.recovery_for, 0)
-                effective_max = self._max_recovery_depth
+
+                # max_recovery_depth bounds lineage *depth*; this bounds total
+                # attempts spent across the whole family — tier escalation
+                # times attempts times generations can still add up to a lot
+                # even within the depth cap. Independent of --unstall: an
+                # exemption from the depth limit is not also an exemption
+                # from the cost ceiling.
+                family_attempts = 0
+                walk_id: str | None = new_task.recovery_for
+                seen: set[str] = set()
+                while walk_id is not None and walk_id not in seen:
+                    seen.add(walk_id)
+                    ancestor = task_by_id.get(walk_id)
+                    if ancestor is None:
+                        break
+                    family_attempts += len(ancestor.attempt_log)
+                    walk_id = ancestor.recovery_for
+                if family_attempts > self._max_family_attempts:
+                    raise OrchestratorStalledError(
+                        f"Recovery task for '{new_task.recovery_for}' would continue a family "
+                        f"that has already cost {family_attempts} total attempts, exceeding "
+                        f"max_family_attempts ({self._max_family_attempts}).",
+                        stalled_task_id=new_task.recovery_for,
+                    )
+
                 if new_task.recovery_for == input.unstall_task_id:
-                    # A human has explicitly reviewed this specific lineage and
-                    # authorized one recovery attempt beyond the normal cap
-                    # (haive run --unstall <task_id>) — every other lineage is
-                    # still held to max_recovery_depth.
-                    effective_max += 1
+                    # A human has explicitly reviewed this specific task and
+                    # authorized one recovery attempt beyond wherever its
+                    # lineage currently sits (haive run --unstall <task_id>) —
+                    # relative to *this task's own depth*, not the configured
+                    # max, so a lineage that was already unstalled once can be
+                    # unstalled again later. Every other lineage is still held
+                    # to max_recovery_depth.
+                    effective_max = source_depth + 1
+                else:
+                    effective_max = self._max_recovery_depth
                 if source_depth + 1 > effective_max:
                     raise OrchestratorStalledError(
                         f"Recovery task for '{new_task.recovery_for}' would exceed "
@@ -95,5 +128,12 @@ class Orchestrator:
                         f"Source task lineage_depth={source_depth}.",
                         stalled_task_id=new_task.recovery_for,
                     )
+                # Compute lineage_depth authoritatively rather than trusting the
+                # orchestrator LLM's own count — a miscount here would silently
+                # corrupt the recorded depth for this task and every recovery
+                # descendant created from it afterward.
+                if new_task.lineage_depth != source_depth + 1:
+                    new_task = new_task.model_copy(update={"lineage_depth": source_depth + 1})
+            corrected_new_tasks.append(new_task)
 
-        return output
+        return output.model_copy(update={"new_tasks": corrected_new_tasks})

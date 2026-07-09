@@ -104,7 +104,10 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 | `MAX_WAVES_PER_RUN` | no | `2` | Caps how many plan/execute waves one `haive run` invocation will loop through automatically. |
 | `MAX_MILESTONES_PER_RUN` | no | `3` | Caps how many milestones one `haive run-all` invocation will advance through automatically. |
 | `MAX_RECOVERY_DEPTH` | no | `3` | Caps how many times the orchestrator can chain recovery tasks for the same failure lineage before escalating to a human. Once hit, `haive run --unstall <task_id>` (after reviewing and correcting the issue) authorizes exactly one more recovery attempt for that specific lineage, without raising the limit for anything else. |
+| `MAX_FAMILY_ATTEMPTS` | no | `15` | Caps total attempts across a recovery lineage (independent of `MAX_RECOVERY_DEPTH`'s depth-only limit) before escalating to a human. |
 | `MAX_EXECUTORS` | no | `4` | Max tasks executed concurrently within a wave (only independent tasks — dependency order is always respected). |
+| `VERIFICATION_ENABLED` | no | `true` | Runs cheap, deterministic checks (path safety, syntax, imports, and any `VERIFICATION_COMMANDS`) against a submission before the LLM reviewer is called — a failure here costs no reviewer call. Disable for a target project this doesn't apply well to (e.g. non-Python). |
+| `VERIFICATION_COMMANDS` | no | auto-detected | Comma-separated commands run against the target project as part of verification (e.g. `python -m pytest -q,ruff check .`). Commands come only from this setting, never from the LLM. Empty (default) auto-detects a `tests/` directory and runs `python -m pytest -q` if found, else nothing. |
 | `OBSERVABILITY_ENABLED` | no | `false` | Enables OpenTelemetry tracing (with LiteLLM auto-instrumentation) for each run. |
 | `PHOENIX_OTLP_ENDPOINT` | no | `http://localhost:6006/v1/traces` | Where OTel traces are exported when observability is enabled. |
 

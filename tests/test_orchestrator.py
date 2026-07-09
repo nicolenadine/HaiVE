@@ -128,11 +128,13 @@ def _make_tier_config() -> TierConfig:
 def _make_orchestrator(
     mock_client: MagicMock,
     max_recovery_depth: int = 3,
+    max_family_attempts: int = 15,
 ) -> Orchestrator:
     return Orchestrator(
         model_client=mock_client,
         tier_config=_make_tier_config(),
         max_recovery_depth=max_recovery_depth,
+        max_family_attempts=max_family_attempts,
     )
 
 
@@ -306,15 +308,45 @@ class TestOrchestratorRunLoop:
         result = orch.run_loop(_make_input(tasks=tasks, unstall_task_id="42"))
         assert result.new_tasks[0].recovery_for == "42"
 
-    def test_unstall_task_id_exemption_is_one_attempt_only(self):
-        # The exemption lifts the cap by exactly one level — it is not an
-        # unlimited lift for that lineage.
+    def test_unstall_task_id_works_even_when_already_past_the_global_cap(self):
+        # Regression test: the exemption must be relative to the unstalled
+        # task's own current depth, not the configured max_recovery_depth —
+        # otherwise a lineage that was already unstalled once (and is now
+        # sitting past the global cap as a result) could never be unstalled
+        # a second time, even though the human is explicitly authorizing it
+        # again for that exact task.
         recovery = _make_new_task(recovery_for="42", lineage_depth=5)
         client = _mock_client(_output_json(new_tasks=[recovery]))
         orch = _make_orchestrator(client, max_recovery_depth=3)
         tasks = [_make_view("42", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=4)]
-        with pytest.raises(OrchestratorStalledError):
+        result = orch.run_loop(_make_input(tasks=tasks, unstall_task_id="42"))
+        assert result.new_tasks[0].recovery_for == "42"
+        assert result.new_tasks[0].lineage_depth == 5
+
+    def test_unstall_task_id_does_not_cover_the_new_task_s_own_future_recovery(self):
+        # Unstalling 42 authorizes creating a recovery FOR 42 — it does not
+        # also exempt the resulting new task's own eventual recovery later.
+        # That would need its own separate --unstall call naming the new id.
+        bad_recovery = _make_new_task(recovery_for="43", lineage_depth=6)
+        client = _mock_client(_output_json(new_tasks=[bad_recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("43", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=5)]
+        with pytest.raises(OrchestratorStalledError) as exc_info:
             orch.run_loop(_make_input(tasks=tasks, unstall_task_id="42"))
+        assert exc_info.value.stalled_task_id == "43"
+
+    def test_recovery_task_lineage_depth_is_computed_not_trusted(self):
+        # Regression test: the orchestrator LLM's own lineage_depth count can
+        # drift across a long recovery chain — the code must compute it
+        # authoritatively as source_depth + 1, not trust whatever value the
+        # model put in its output, or the recorded depth silently corrupts
+        # every subsequent generation built from it.
+        wrong_depth_recovery = _make_new_task(recovery_for="42", lineage_depth=1)
+        client = _mock_client(_output_json(new_tasks=[wrong_depth_recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("42", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=2)]
+        result = orch.run_loop(_make_input(tasks=tasks))
+        assert result.new_tasks[0].lineage_depth == 3
 
     def test_unstall_task_id_does_not_exempt_other_lineages(self):
         # Exempting task 42 must not accidentally lift the cap for an

@@ -166,10 +166,11 @@ When either condition holds:
 - Set lineage_depth = failed_task.lineage_depth + 1
 
 Never create a recovery task if lineage_depth >= {max_recovery_depth}, UNLESS that task's id
-equals unstall_task_id in the input — in that one case, a recovery task may be created even at
-lineage_depth == {max_recovery_depth} (but no further; the exemption is for one attempt only, not
-an unlimited lift). The normal eligibility requirement still applies even when unstalled: only
-create the recovery task if verdict.infeasible is true or a new comment exists for it.
+equals unstall_task_id in the input — in that one case, a recovery task may be created for it
+regardless of how deep its own lineage_depth already is (this is one authorized attempt for that
+specific task, not an unlimited lift on whatever generation comes after it). The normal
+eligibility requirement still applies even when unstalled: only create the recovery task if
+verdict.infeasible is true or a new comment exists for it.
 
 A task with status "awaiting_merge" is never eligible for recovery and never needs one — it
 already passed review and is sitting in an open, approved PR; only a merge action is pending, not
@@ -187,6 +188,14 @@ nothing available to you confirms it, write the recovery task to have the agent 
 values and follow the same approach") rather than asserting it as given. Restating an unconfirmed
 claim from the failed task's own description or its reviewer's feedback verbatim is exactly how a
 false premise survives into another failed generation.
+
+When writing a recovery task's description, read the failed task's *full* attempt_log, not just
+its most recent entry. If review feedback contradicts itself across rounds — one round instructs
+building something one way, a later round rejects that and instructs the opposite — do not simply
+follow the most recent instruction as if it were settled. Name the contradiction explicitly in the
+recovery task's description (both instructions, and that they conflict) so the implementing agent
+knows to resolve the actual underlying requirement rather than swing back and forth between two
+reviewers' incompatible suggestions.
 
 ## Done condition
 

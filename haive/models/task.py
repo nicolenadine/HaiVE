@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from haive.models.enums import AgentRole, Complexity, TaskStatus
+from haive.models.execution import CommandResult
 
 _MAX_ATTEMPT_LOG_REASON_CHARS = 50000
 # TODO: temporarily generous (was 500) so failed schema-validation attempts
@@ -48,9 +49,10 @@ class TaskComment(BaseModel):
 
 
 class AttemptLogEntry(BaseModel):
-    tier:    Complexity
-    attempt: int
-    reason:  str
+    tier:            Complexity
+    attempt:         int
+    reason:          str
+    command_results: list[CommandResult] = Field(default_factory=list)
 
     @field_validator("reason")
     @classmethod

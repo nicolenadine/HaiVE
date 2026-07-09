@@ -182,6 +182,32 @@ class TestCheckoutBranch:
 
 
 # ---------------------------------------------------------------------------
+# TestResetWorkingTree
+# ---------------------------------------------------------------------------
+
+class TestResetWorkingTree:
+    def test_runs_checkout_dash_dash_dot_then_clean(self):
+        adapter = _make_adapter()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            adapter.reset_working_tree("haive/task-42")
+
+        assert mock_run.call_count == 2
+        calls = mock_run.call_args_list
+        assert calls[0] == call(
+            ["git", "checkout", "--", "."], check=True, capture_output=True, timeout=30
+        )
+        assert calls[1] == call(["git", "clean", "-fd"], check=True, capture_output=True, timeout=30)
+
+    def test_raises_runtime_error_on_git_failure(self):
+        adapter = _make_adapter()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(1, "git checkout", stderr=b"error")
+            with pytest.raises(RuntimeError, match="git command failed"):
+                adapter.reset_working_tree("haive/task-42")
+
+
+# ---------------------------------------------------------------------------
 # TestPushCommits
 # ---------------------------------------------------------------------------
 
