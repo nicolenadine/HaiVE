@@ -281,8 +281,15 @@ class GitHubPMAdapter:
         """Close the milestone on GitHub once its final PR has merged, so
         list_open_milestones() (haive run-all's queue) naturally skips it on
         every future invocation instead of re-verifying it's done each time.
+
+        Raises plain RuntimeError (not github.GithubException) on failure —
+        PyGithub's own exception types must not leak past the adapters/
+        boundary; callers outside it only ever catch RuntimeError.
         """
-        self._repo_obj.get_milestone(int(project_id)).edit(state="closed")
+        try:
+            self._repo_obj.get_milestone(int(project_id)).edit(state="closed")
+        except github.GithubException as exc:
+            raise RuntimeError(f"Could not close milestone #{project_id}: {exc}") from exc
 
     def close_completed_tasks(self, project_id: str) -> None:
         """Close the GitHub issue for every COMPLETE task in this milestone.
@@ -292,10 +299,16 @@ class GitHubPMAdapter:
         a milestone is done, no further scheduling happens against it, so
         there's no risk of a still-open dependency lookup needing one of
         these issues to still be open.
+
+        Raises plain RuntimeError (not github.GithubException) on failure —
+        see close_milestone()'s docstring.
         """
-        for task in self.get_tasks(project_id):
-            if task.status == TaskStatus.COMPLETE:
-                self._repo_obj.get_issue(int(task.task_id)).edit(state="closed")
+        try:
+            for task in self.get_tasks(project_id):
+                if task.status == TaskStatus.COMPLETE:
+                    self._repo_obj.get_issue(int(task.task_id)).edit(state="closed")
+        except github.GithubException as exc:
+            raise RuntimeError(f"Could not close completed tasks for milestone #{project_id}: {exc}") from exc
 
     def _project_items_for_milestone(self, milestone_number: int) -> list[dict[str, Any]]:
         """Project-board items belonging to this milestone.

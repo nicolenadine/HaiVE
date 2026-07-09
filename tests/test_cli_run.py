@@ -323,6 +323,28 @@ class TestRunDoneTrue:
         m["pm"].close_milestone.assert_not_called()
         m["pm"].close_completed_tasks.assert_not_called()
 
+    def test_cleanup_failure_does_not_crash_a_successful_milestone(self):
+        # Regression test: end-of-milestone cleanup (closing completed
+        # tasks/the milestone) is cosmetic, not required for correctness.
+        # A GitHub API error there (auth expiring mid-run, a transient
+        # failure, etc.) must not crash the whole process — the milestone's
+        # real work (the merge) already succeeded by this point.
+        #
+        # PMAdapter methods raise plain RuntimeError to callers (see
+        # GitHubPMAdapter.close_milestone's docstring) — github.GithubException
+        # itself must never cross the adapters/ boundary into cli.py.
+        m = _base_mocks()
+        m["orchestrator"].run_loop.return_value = OrchestratorOutput(done=True, new_tasks=[])
+        m["vcs"].branch_has_new_commits.return_value = False
+        m["pm"].close_completed_tasks.side_effect = RuntimeError(
+            "Could not close completed tasks for milestone #42: 401 Bad credentials"
+        )
+        result = _run_with_mocks(m, catch_exceptions=True)
+        assert result.exit_code == 0
+        assert result.exception is None
+        assert "warning" in result.output.lower()
+        assert "bad credentials" in result.output.lower()
+
 
 class TestRunProjectBranch:
     def test_ensures_project_branch_from_project_data(self):

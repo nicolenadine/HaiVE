@@ -241,6 +241,22 @@ def _preflight_checks() -> None:
 
 # ── Output formatting ─────────────────────────────────────────────────────────
 
+def _close_finished_milestone(pm, milestone_id: str) -> None:
+    """Best-effort end-of-milestone cleanup — closing completed tasks and
+    the milestone itself is cosmetic tidiness, not required for
+    correctness. A milestone whose final PR already merged must still be
+    reported done even if this fails (e.g. a transient GitHub API error);
+    the next invocation will just find things still open and retry the
+    cleanup then, rather than the whole run crashing over a non-critical
+    step after the actual, important work already succeeded.
+    """
+    try:
+        pm.close_completed_tasks(milestone_id)
+        pm.close_milestone(milestone_id)
+    except RuntimeError as exc:
+        typer.echo(f"Warning: could not close completed tasks/milestone: {exc}")
+
+
 def _print_dry_run_output(project, output) -> None:
     bar = "─" * 62
     title = project.title
@@ -697,8 +713,7 @@ def _run_milestone(
                                 try:
                                     vcs.merge_pr(pr_id)
                                     typer.echo("Final PR merged automatically (milestone checkpoint disabled).")
-                                    pm.close_completed_tasks(milestone_id)
-                                    pm.close_milestone(milestone_id)
+                                    _close_finished_milestone(pm, milestone_id)
                                     return MilestoneRunOutcome.DONE_MERGED
                                 except RuntimeError as exc:
                                     typer.echo(f"Automatic merge of the final PR failed: {exc}")
@@ -709,8 +724,7 @@ def _run_milestone(
                                 "\nProject complete. All changes were already merged into main "
                                 "— nothing further to merge."
                             )
-                            pm.close_completed_tasks(milestone_id)
-                            pm.close_milestone(milestone_id)
+                            _close_finished_milestone(pm, milestone_id)
                             return MilestoneRunOutcome.DONE_MERGED
 
                     # Create new tasks and resolve "new:N" dependency refs.

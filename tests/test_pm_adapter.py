@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import github
 import pytest
 
 from haive.adapters.pm.github import GitHubPMAdapter, _parse_checkpoint
@@ -264,6 +265,18 @@ class TestCloseMilestone:
         adapter._repo_obj.get_milestone.assert_called_once_with(7)
         ms.edit.assert_called_once_with(state="closed")
 
+    def test_github_exception_is_translated_to_runtime_error(self):
+        # Regression test: github.GithubException must never cross the
+        # adapters/ boundary — callers outside it (cli.py) only ever catch
+        # RuntimeError, enforced by test_no_component_outside_adapters_imports_pygithub.
+        adapter = _make_adapter()
+        adapter._repo_obj.get_milestone.return_value.edit.side_effect = (
+            github.GithubException(401, {"message": "Bad credentials"}, None)
+        )
+
+        with pytest.raises(RuntimeError, match="Bad credentials"):
+            adapter.close_milestone("7")
+
 
 # ---------------------------------------------------------------------------
 # TestCloseCompletedTasks
@@ -296,6 +309,21 @@ class TestCloseCompletedTasks:
         adapter.close_completed_tasks("7")
 
         adapter._repo_obj.get_issue.assert_not_called()
+
+    def test_github_exception_is_translated_to_runtime_error(self):
+        # Regression test: github.GithubException must never cross the
+        # adapters/ boundary — callers outside it (cli.py) only ever catch
+        # RuntimeError, enforced by test_no_component_outside_adapters_imports_pygithub.
+        adapter = _make_adapter()
+        adapter.get_tasks = MagicMock(return_value=[
+            MagicMock(task_id="10", status=TaskStatus.COMPLETE),
+        ])
+        adapter._repo_obj.get_issue.return_value.edit.side_effect = (
+            github.GithubException(401, {"message": "Bad credentials"}, None)
+        )
+
+        with pytest.raises(RuntimeError, match="Bad credentials"):
+            adapter.close_completed_tasks("7")
 
 
 # ---------------------------------------------------------------------------
