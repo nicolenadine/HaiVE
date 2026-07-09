@@ -257,6 +257,49 @@ def _close_finished_milestone(pm, milestone_id: str) -> None:
         typer.echo(f"Warning: could not close completed tasks/milestone: {exc}")
 
 
+def _format_recovery_lineage_summary(
+    stalled_task_id: str,
+    tasks: list,
+    state,
+    max_recovery_depth: int,
+) -> str:
+    """Summarize a maxed-out recovery chain for a human reading the GitHub issue.
+
+    Walks recovery_for pointers back to the root task, root-first, so a human
+    opening stalled_task_id's issue sees every generation's outcome without
+    having to trace the chain themselves via git/GitHub history.
+    """
+    tasks_by_id = {t.task_id: t for t in tasks}
+
+    chain: list = []
+    current_id: str | None = stalled_task_id
+    while current_id is not None:
+        task = tasks_by_id.get(current_id)
+        if task is None:
+            break
+        chain.append(task)
+        current_id = task.recovery_for
+    chain.reverse()
+
+    lines = [
+        "**haive: recovery chain exhausted — max_recovery_depth reached**",
+        "",
+        "This task is part of a recovery chain that has repeatedly failed. "
+        f"No further automatic recovery will be attempted (max_recovery_depth = {max_recovery_depth}).",
+        "",
+    ]
+    for task in chain:
+        record = state.tasks.get(task.task_id)
+        reason = record.verdict.reason if record and record.verdict else "no verdict recorded"
+        attempts = record.total_attempts if record else 0
+        lines.append(
+            f"- Generation {task.lineage_depth} (#{task.task_id}): {reason} ({attempts} attempt(s))"
+        )
+    lines.append("")
+    lines.append("Human review is needed to break the chain — retrying is unlikely to help further.")
+    return "\n".join(lines)
+
+
 def _print_dry_run_output(project, output) -> None:
     bar = "─" * 62
     title = project.title
@@ -693,6 +736,11 @@ def _run_milestone(
                     try:
                         output = orchestrator.run_loop(orch_input)
                     except OrchestratorStalledError as e:
+                        if e.stalled_task_id is not None:
+                            summary = _format_recovery_lineage_summary(
+                                e.stalled_task_id, tasks, state, settings.max_recovery_depth
+                            )
+                            pm.add_comment(e.stalled_task_id, summary)
                         typer.echo(f"\n{e} — waiting on human input.")
                         return MilestoneRunOutcome.STALLED
 

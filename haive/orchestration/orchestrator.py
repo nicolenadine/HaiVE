@@ -22,6 +22,10 @@ class OrchestratorStalledError(RuntimeError):
     or a recovery attempt hitting max_recovery_depth) working as designed.
     """
 
+    def __init__(self, message: str, stalled_task_id: str | None = None) -> None:
+        super().__init__(message)
+        self.stalled_task_id = stalled_task_id
+
 
 class Orchestrator:
     def __init__(
@@ -81,7 +85,8 @@ class Orchestrator:
                     raise OrchestratorStalledError(
                         f"Recovery task for '{new_task.recovery_for}' would exceed "
                         f"max_recovery_depth ({self._max_recovery_depth}). "
-                        f"Source task lineage_depth={source_depth}."
+                        f"Source task lineage_depth={source_depth}.",
+                        stalled_task_id=new_task.recovery_for,
                     )
 
         return output

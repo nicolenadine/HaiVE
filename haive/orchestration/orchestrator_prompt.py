@@ -160,6 +160,16 @@ A task with status "awaiting_merge" is never eligible for recovery and never nee
 already passed review and is sitting in an open, approved PR; only a merge action is pending, not
 a rewrite. Do not create a recovery task for it under any circumstances.
 
+When writing a recovery task's description, do not assert a fact about the *current* state of
+the codebase (for example, "field X already exists," "Y is already wired up") unless repo_map or
+the failed task's own provided code context actually confirms it. A prior attempt's rejected
+edits, or a prior reviewer's suggested fix, are not confirmation that something landed — that
+attempt failed and its changes were never merged. If the failed task's history suggests such a
+fact but nothing available to you confirms it, write the recovery task to have the agent check
+and adapt (for example, "add the field if it does not already exist") rather than asserting it as
+given. Restating an unconfirmed claim from the failed task's own description or its reviewer's
+feedback verbatim is exactly how a false premise survives into another failed generation.
+
 ## Done condition
 
 Set done=true only when every task has status "complete" and no pending, blocked, in_progress, or

@@ -477,6 +477,48 @@ class TestRunAutonomousWaveLoop:
         assert m["orchestrator"].run_loop.call_count == 1
         m["scheduler"].start.assert_not_called()
 
+    def test_orchestrator_stalled_error_with_no_stalled_task_id_posts_no_comment(self):
+        # The empty-new_tasks stall isn't about any specific task — nothing to comment on.
+        m = _base_mocks()
+        m["orchestrator"].run_loop.side_effect = OrchestratorStalledError(
+            "Orchestrator returned empty new_tasks without signaling done."
+        )
+        _run_with_mocks(m, catch_exceptions=True)
+        m["pm"].add_comment.assert_not_called()
+
+    def test_orchestrator_stalled_error_posts_recovery_lineage_comment(self):
+        # A maxed-out recovery chain must be visible on the GitHub issue itself,
+        # not just echoed to the local console a human may never see.
+        m = _base_mocks()
+        root_task = make_task(task_id="24", status=TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=0)
+        recovery_task = make_task(
+            task_id="30", status=TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=1, recovery_for="24",
+        )
+        m["pm"].get_tasks.return_value = [root_task, recovery_task]
+        m["state"].tasks = {
+            "24": TaskExecutionRecord(
+                task_id="24", total_attempts=6,
+                verdict=VerdictSummary(passed=False, reason="broke dry-run output"),
+            ),
+            "30": TaskExecutionRecord(
+                task_id="30", total_attempts=6,
+                verdict=VerdictSummary(passed=False, reason="uv field does not exist"),
+            ),
+        }
+        m["orchestrator"].run_loop.side_effect = OrchestratorStalledError(
+            "Recovery task for '30' would exceed max_recovery_depth (3). Source task lineage_depth=3.",
+            stalled_task_id="30",
+        )
+        _run_with_mocks(m, catch_exceptions=True)
+        m["pm"].add_comment.assert_called_once()
+        posted_task_id, posted_comment = m["pm"].add_comment.call_args.args
+        assert posted_task_id == "30"
+        assert "#24" in posted_comment
+        assert "broke dry-run output" in posted_comment
+        assert "#30" in posted_comment
+        assert "uv field does not exist" in posted_comment
+        assert "max_recovery_depth" in posted_comment
+
 
 class TestReconciliation:
     def test_marks_merged_pr_as_complete_and_refreshes_tasks(self):

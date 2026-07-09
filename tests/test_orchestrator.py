@@ -281,6 +281,18 @@ class TestOrchestratorRunLoop:
         with pytest.raises(OrchestratorStalledError):
             orch.run_loop(_make_input(tasks=tasks))
 
+    def test_recovery_at_max_depth_sets_stalled_task_id(self):
+        # A human reading the stalled task's GitHub issue needs to know which
+        # task this is about — stalled_task_id lets a caller post a lineage
+        # summary there instead of only echoing to the local console.
+        bad_recovery = _make_new_task(recovery_for="42", lineage_depth=4)
+        client = _mock_client(_output_json(new_tasks=[bad_recovery]))
+        orch = _make_orchestrator(client, max_recovery_depth=3)
+        tasks = [_make_view("42", TaskStatus.NEEDS_HUMAN_REVIEW, lineage_depth=3)]
+        with pytest.raises(OrchestratorStalledError) as exc_info:
+            orch.run_loop(_make_input(tasks=tasks))
+        assert exc_info.value.stalled_task_id == "42"
+
     def test_done_true_signals_completion(self):
         client = _mock_client(_output_json(done=True))
         orch = _make_orchestrator(client)
@@ -299,6 +311,15 @@ class TestOrchestratorRunLoop:
         orch = _make_orchestrator(client)
         with pytest.raises(OrchestratorStalledError):
             orch.run_loop(_make_input())
+
+    def test_empty_tasks_stall_has_no_stalled_task_id(self):
+        # This stall isn't about any specific task, so there's nothing to
+        # post a lineage comment to — stalled_task_id must stay None.
+        client = _mock_client(_output_json(new_tasks=[], done=False))
+        orch = _make_orchestrator(client)
+        with pytest.raises(OrchestratorStalledError) as exc_info:
+            orch.run_loop(_make_input())
+        assert exc_info.value.stalled_task_id is None
 
     def test_new_comments_in_input(self):
         comment = TaskComment(

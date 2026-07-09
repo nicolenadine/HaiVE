@@ -58,6 +58,27 @@ Only use this when you can point to the specific structural fact that makes it i
 
 `findings` may be empty here — there is nothing for the task agent to fix on retry.
 
+## When the Task's Premise Contradicts the Real Code
+
+A different but related failure mode: the task's own description or acceptance
+criteria assert something about the *existing* codebase — a field, function, or
+integration already being present — that the Relevant Code you were actually given
+directly contradicts. For example: the task says "a `uv` field already exists on the
+project config, do not add or redefine config fields" while the acceptance criteria
+requires behavior that depends on that field, but the provided `config.py` has no such
+field.
+
+This is also `infeasible`, not a normal `passed=false`: retrying can't fix it, because
+the task is instructing the agent not to create the very thing its own success
+requires. Do not file it as a normal finding suggesting a different access pattern
+(e.g. "use `config.uv` directly instead of `getattr`") — that framing treats a false
+premise as an implementation mistake and will fail again identically next attempt.
+
+Use the same output shape as above, but make `summary` name the exact false claim and
+what the provided code actually shows — e.g. "Task claims a `uv` field already exists
+on `ProjectConfig`; the provided `config.py` has no such field." This is what lets a
+corrected retry actually succeed, instead of repeating the same contradiction.
+
 ---
 
 # Output Format
