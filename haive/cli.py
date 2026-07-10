@@ -621,7 +621,11 @@ def _run_milestone(
         if settings.observability_enabled:
             setup_observability(settings)
 
-        registry = AgentRegistry.load(agents)
+        try:
+            registry = AgentRegistry.load(agents)
+        except FileNotFoundError as e:
+            typer.secho(f"Error: agents.yaml not found at '{agents}' ({e}).", fg="red", err=True)
+            raise typer.Exit(code=1)
         tier_config = TierConfig.from_settings(settings)
         model_client = ModelClient(settings)
         pm = GitHubPMAdapter(settings)
@@ -956,14 +960,21 @@ def _run_milestone(
             )
             return MilestoneRunOutcome.WAVE_LIMIT_REACHED
 
-    except FileNotFoundError as e:
-        typer.secho(f"Error: agents.yaml not found at '{agents}' ({e}).", fg="red", err=True)
-        raise typer.Exit(code=1)
     except (RuntimeError, APIError) as e:
         typer.secho(f"Error: {e}", fg="red", err=True)
         raise typer.Exit(code=1)
     except ValidationError as e:
         typer.secho(f"Validation error: {e}", fg="red", err=True)
+        raise typer.Exit(code=1)
+    except Exception as e:
+        # Catches anything not already handled above by a more specific
+        # clause — e.g. a FileNotFoundError from somewhere deep in the wave
+        # loop (a missing interpreter, a missing file a task touched) that
+        # has nothing to do with agents.yaml. A single broad
+        # `except FileNotFoundError` here once mislabeled exactly that kind
+        # of error as "agents.yaml not found", since agents.yaml's own
+        # FileNotFoundError is now caught right at its source above instead.
+        typer.secho(f"Error: {type(e).__name__}: {e}", fg="red", err=True)
         raise typer.Exit(code=1)
 
 

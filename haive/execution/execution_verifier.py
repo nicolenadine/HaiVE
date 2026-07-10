@@ -63,7 +63,12 @@ class ExecutionVerifier:
 
     def _auto_detect_commands(self) -> list[str]:
         if Path(self._root, "tests").is_dir():
-            return ["python -m pytest -q"]
+            # Bare "python" is not guaranteed to exist on PATH (e.g. macOS
+            # with only "python3", or no ambient interpreter at all) — this
+            # crashed for real (FileNotFoundError: 'python') the first time
+            # it ran against a project without one. Use the same resolved
+            # interpreter as the import check, not an unresolved literal.
+            return [f"{self._resolve_python()} -m pytest -q"]
         return []
 
     def _resolve_python(self) -> str:

@@ -121,6 +121,18 @@ class TestConfiguredCommands:
         assert result.passed is False
         assert result.stage == "command"
 
+    def test_auto_detected_command_uses_resolved_interpreter_not_bare_python(self, tmp_path):
+        # Regression test: this used to hardcode the literal string "python",
+        # which crashed for real (FileNotFoundError: 'python') on a system
+        # with no bare "python" on PATH (e.g. only "python3", or only a
+        # project .venv) — the same resolved interpreter the import check
+        # already uses (.venv/bin/python if present, else sys.executable)
+        # must be used here too, not an unresolved literal.
+        (tmp_path / "tests").mkdir()
+        verifier = make_verifier(tmp_path, verification_commands=[])
+        assert verifier._commands == [f"{verifier._resolve_python()} -m pytest -q"]
+        assert verifier._commands[0].split()[0] != "python"
+
     def test_no_tests_dir_and_no_configured_commands_skips_cleanly(self, tmp_path):
         (tmp_path / "ok.py").write_text("x = 1\n")
         verifier = make_verifier(tmp_path, verification_commands=[])

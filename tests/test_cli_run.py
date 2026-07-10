@@ -205,6 +205,21 @@ class TestRunMissingAgentsYaml:
         assert result.exit_code == 1
         assert "agents.yaml not found" in result.output.lower()
 
+    def test_unrelated_file_not_found_error_is_not_blamed_on_agents_yaml(self):
+        # Regression test: a single broad `except FileNotFoundError` around
+        # the whole wave loop used to mislabel ANY FileNotFoundError raised
+        # anywhere deep inside it (e.g. a missing interpreter binary from a
+        # verification command) as "agents.yaml not found" — actively
+        # misleading, since agents.yaml loaded successfully. agents.yaml's
+        # own FileNotFoundError is now caught right at AgentRegistry.load()
+        # instead of at the top of the whole function.
+        m = _base_mocks()
+        m["scheduler"].start.side_effect = FileNotFoundError(2, "No such file or directory", "python")
+        result = _run_with_mocks(m, catch_exceptions=True)
+        assert result.exit_code == 1
+        assert "agents.yaml" not in result.output.lower()
+        assert "python" in result.output.lower()
+
 
 class TestBundledAgentsDefault:
     def test_bundled_registry_loads_from_a_foreign_cwd(self, tmp_path, monkeypatch):
