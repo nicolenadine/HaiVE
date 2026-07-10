@@ -671,7 +671,9 @@ def _run_milestone(
         guidelines = next(
             (p.read_text(encoding="utf-8") for p in guidelines_candidates if p.exists()), ""
         )
-        review_agent = ReviewAgent(model_client, reviewer_system_prompt, guidelines, root)
+        review_agent = ReviewAgent(
+            model_client, reviewer_system_prompt, guidelines, root, models=settings.reviewer_models,
+        )
         command_runner = CommandRunner(
             secrets_to_redact=[
                 settings.github_token, settings.anthropic_api_key, settings.openai_api_key,

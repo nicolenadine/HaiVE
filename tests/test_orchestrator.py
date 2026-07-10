@@ -122,7 +122,7 @@ def _make_input(
 
 def _make_tier_config() -> TierConfig:
     tier = Tier(models=["high-model"], max_attempts=2, context_budget=32000)
-    return TierConfig(low=tier, medium=tier, high=tier, orchestrator=tier, reviewer=tier)
+    return TierConfig(low=tier, medium=tier, high=tier, orchestrator=tier)
 
 
 def _make_orchestrator(

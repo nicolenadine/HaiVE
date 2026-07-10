@@ -34,12 +34,21 @@ _MAX_API_ERRORS = 3
 _MIN_LINES_FOR_SHRINKAGE_CHECK = 20
 _MAX_ALLOWED_SHRINKAGE = 0.5
 
-# An order of magnitude smaller than the reviewer's own budget/round limit:
-# discovery now forces full-file loading for non-scaffold tasks, so this is a
-# rarely-firing escape hatch for a referenced file discovery didn't select,
-# not a primary way to load context.
-_EDITOR_CONTEXT_BUDGET = 8_000
-_EDITOR_MAX_CONTEXT_ROUNDS = 4
+# Originally sized an order of magnitude below the reviewer's own budget/round
+# limit, on the assumption that discovery forcing full-file loading made this
+# a rarely-firing escape hatch. That assumption broke in practice: a task
+# description can legitimately instruct the agent to read several specific
+# files via read_file before writing code (e.g. a recovery task pointing at
+# real code to verify, per the false-premise defenses elsewhere in this
+# file/orchestrator_prompt.py), and hitting this ceiling mid-investigation
+# forces a premature final answer with no guarantee it's valid JSON — which is
+# exactly what happened for real (task_executor schema-validation failure
+# "Could not locate a JSON object", both attempts, quickstart M3 task #38).
+# Sized generously now, matching the reviewer's own budget/round limit, so
+# this stops being the thing that fails a task — not tuned down again without
+# real usage data showing it's safe to.
+_EDITOR_CONTEXT_BUDGET = 32_000
+_EDITOR_MAX_CONTEXT_ROUNDS = 20
 
 
 def _utcnow() -> datetime:

@@ -11,7 +11,13 @@ from haive.orchestration.example_library import ExampleLibrary, format_examples_
 from haive.orchestration.example_selector import ExampleSelector
 from haive.orchestration.orchestrator_prompt import build_orchestrator_prompt
 
-_ORCHESTRATOR_MAX_OUTPUT_TOKENS = 4096
+# Authoring several new_tasks in one wave, each with a full description,
+# acceptance criteria, and (for a recovery task) an explanation of prior
+# contradictory feedback, can run well past a couple thousand tokens — raised
+# generously rather than left at the smallest value that happened to work,
+# matching the same reasoning as the editor/reviewer budgets in
+# task_executor.py and review_agent.py.
+_ORCHESTRATOR_MAX_OUTPUT_TOKENS = 8192
 
 
 class OrchestratorStalledError(RuntimeError):

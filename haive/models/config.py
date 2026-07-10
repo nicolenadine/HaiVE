@@ -43,8 +43,15 @@ class Settings(BaseSettings):
     tier_high_max_attempts: int = 2
     tier_high_context_budget: int = 32000
 
-    # Review agent
-    reviewer_models: list[str] = Field(default=["anthropic/claude-sonnet-4-6", "openai/gpt-4o"])
+    # Review agent — ordered least-capable to most-capable; ReviewAgent advances
+    # through this list on an "uncertain" verdict.
+    reviewer_models: list[str] = Field(
+        default=[
+            "anthropic/claude-haiku-4-5-20251001",
+            "anthropic/claude-sonnet-4-6",
+            "anthropic/claude-opus-4-8",
+        ]
+    )
 
     # Execution verification — cheap, deterministic checks (path safety, syntax,
     # import, configured commands) run before the reviewer is called. Commands

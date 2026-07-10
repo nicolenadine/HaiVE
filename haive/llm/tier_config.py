@@ -7,7 +7,6 @@ from haive.models.config import Settings
 from haive.models.enums import Complexity
 
 _ORCHESTRATOR_CONTEXT_BUDGET = 32000
-_REVIEWER_CONTEXT_BUDGET = 16000
 
 
 @dataclass
@@ -16,7 +15,6 @@ class TierConfig:
     medium:       Tier
     high:         Tier
     orchestrator: Tier
-    reviewer:     Tier
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "TierConfig":
@@ -40,11 +38,6 @@ class TierConfig:
                 models=settings.tier_high_models,
                 max_attempts=1,
                 context_budget=_ORCHESTRATOR_CONTEXT_BUDGET,
-            ),
-            reviewer=Tier(
-                models=settings.reviewer_models,
-                max_attempts=1,
-                context_budget=_REVIEWER_CONTEXT_BUDGET,
             ),
         )
 

@@ -132,7 +132,7 @@ def _apply_common_patches(
     stack.enter_context(patch("haive.discovery.file_index_service.FileIndexService", return_value=m["file_index"]))
     stack.enter_context(patch("haive.orchestration.orchestrator.Orchestrator", return_value=m["orchestrator"]))
     stack.enter_context(patch("haive.orchestration.task_scheduler.TaskScheduler", return_value=m["scheduler"]))
-    stack.enter_context(patch("haive.execution.review_agent.ReviewAgent"))
+    m["review_agent_cls"] = stack.enter_context(patch("haive.execution.review_agent.ReviewAgent"))
     stack.enter_context(patch("haive.execution.task_executor.TaskExecutor"))
     stack.enter_context(patch("haive.observability.setup.setup_observability"))
     stack.enter_context(patch("haive.observability.spans.run_span", return_value=_mock_span_cm()))
@@ -356,6 +356,18 @@ class TestRunProjectBranch:
         m = _base_mocks()
         _run_with_mocks(m, extra_args=["--dry-run"])
         m["vcs"].ensure_branch.assert_not_called()
+
+
+class TestReviewAgentWiring:
+    def test_reviewer_models_from_settings_passed_through(self):
+        # Regression test: ReviewAgent used to ignore Settings.reviewer_models
+        # entirely (a hardcoded module-level list was used instead) — the
+        # documented REVIEWER_MODELS env var had no effect. Confirms cli.py
+        # actually wires the configured value through.
+        m = _base_mocks()
+        _run_with_mocks(m)
+        call_kwargs = m["review_agent_cls"].call_args.kwargs
+        assert call_kwargs["models"] == m["settings"].reviewer_models
 
 
 class TestRunTaskCreation:

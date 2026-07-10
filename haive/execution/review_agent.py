@@ -14,33 +14,31 @@ from haive.models.enums import AgentRole
 from haive.models.review import ReviewVerdict
 from haive.models.task import Task
 
-# Ordered least-capable to most-capable. The reviewer advances on uncertain.
-REVIEWER_MODELS = [
-    "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-6",
-    "claude-opus-4-8",
-]
-
 # A review addressing several acceptance criteria with detailed findings
 # (file, line, severity, message, suggestion per finding) can easily run past
 # a couple thousand tokens — 2048 was found too tight in practice, causing
 # the response to cut off mid-JSON and fail validation identically across
-# every model in REVIEWER_MODELS, not just an occasional one. Matches the
+# every configured reviewer model, not just an occasional one. Matches the
 # same class of fix already applied to test_generator_agent's max_tokens.
-_REVIEW_MAX_TOKENS = 4096
-_REVIEW_CONTEXT_BUDGET = 32_000
+# Raised again (4096 -> 8192, budget/rounds also raised) as a deliberately
+# generous margin rather than the smallest value that happened to work last
+# time — these numbers were always a guess, and guessing too low is what
+# actually failed a real task (see task_executor.py's editor budget comment
+# for the concrete incident). Tune down later only with real usage data.
+_REVIEW_MAX_TOKENS = 8192
+_REVIEW_CONTEXT_BUDGET = 64_000
 
 # Safety valve against non-progressing loops (e.g. repeatedly requesting an
 # empty or nonexistent file, which consumes no token budget). Not a scope
 # limit — the token budget is what bounds how much context can be pulled in.
-_REVIEW_MAX_CONTEXT_ROUNDS = 20
+_REVIEW_MAX_CONTEXT_ROUNDS = 30
 
 
 class ReviewAgent:
     """LLM-as-judge that evaluates task agent output against acceptance criteria.
 
-    Advances through REVIEWER_MODELS (cheapest first) when uncertain.
-    If all models return uncertain, returns a definitive passed=False verdict.
+    Advances through `models` (cheapest first) when uncertain. If all models
+    return uncertain, returns a definitive passed=False verdict.
 
     May read additional repo files on demand (via the shared read_file tool,
     haive/execution/read_file_tool.py) when it needs to verify a claim not
@@ -54,11 +52,13 @@ class ReviewAgent:
         system_prompt: str,
         guidelines: str,
         root: str,
+        models: list[str],
     ) -> None:
         self._client = model_client
         self._system_prompt = system_prompt
         self._guidelines = guidelines
         self._root = root
+        self._models = models
         self._validator = OutputValidator()
 
     def review(
@@ -81,7 +81,7 @@ class ReviewAgent:
         ]
         remaining_budget = _REVIEW_CONTEXT_BUDGET
 
-        for i, model in enumerate(REVIEWER_MODELS):
+        for i, model in enumerate(self._models):
             tier = Tier(models=[model], max_attempts=1, context_budget=_REVIEW_CONTEXT_BUDGET)
             result = run_tool_loop(
                 self._client, tier, messages, _REVIEW_MAX_TOKENS,
@@ -94,7 +94,7 @@ class ReviewAgent:
                 output = self._validator.validate(result.content, AgentRole.CODE_REVIEWER_AGENT)
                 assert isinstance(output, ReviewAgentOutput)
             except (OutputValidationError, AssertionError):
-                if i == len(REVIEWER_MODELS) - 1:
+                if i == len(self._models) - 1:
                     # Preserve an excerpt of the last (most capable) model's raw
                     # output — without this, a parse failure here is a total
                     # black box: the reason string is the only place any trace

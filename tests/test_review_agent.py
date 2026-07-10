@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from haive.execution.review_agent import REVIEWER_MODELS, ReviewAgent
+from haive.execution.review_agent import ReviewAgent
 from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.model_client import ModelClient
 from haive.models.agent_output import CodeEditorOutput, FileEdit
@@ -19,6 +19,7 @@ from haive.models.task import Task
 
 SYSTEM_PROMPT = "You are a code reviewer. Evaluate the submission."
 GUIDELINES = "Write correct, readable code. No secrets in logs."
+TEST_REVIEWER_MODELS = ["test-model-a", "test-model-b", "test-model-c"]
 
 
 def make_task(**kwargs) -> Task:
@@ -55,7 +56,7 @@ def _turn_with_tools(*tool_calls: ToolCall) -> AgenticTurn:
 
 
 def make_agent(client: ModelClient, root: str = "/tmp") -> ReviewAgent:
-    return ReviewAgent(client, SYSTEM_PROMPT, GUIDELINES, root)
+    return ReviewAgent(client, SYSTEM_PROMPT, GUIDELINES, root, models=TEST_REVIEWER_MODELS)
 
 
 PASSING_PAYLOAD = {"passed": True, "uncertain": False, "findings": [], "summary": "LGTM"}
@@ -109,15 +110,15 @@ class TestModelEscalation:
 
     def test_all_uncertain_defaults_to_failed(self):
         client = MagicMock(spec=ModelClient)
-        client.call_single.side_effect = [make_turn(UNCERTAIN_PAYLOAD)] * len(REVIEWER_MODELS)
+        client.call_single.side_effect = [make_turn(UNCERTAIN_PAYLOAD)] * len(TEST_REVIEWER_MODELS)
         verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
-        assert client.call_single.call_count == len(REVIEWER_MODELS)
+        assert client.call_single.call_count == len(TEST_REVIEWER_MODELS)
         assert verdict.passed is False
         assert verdict.uncertain is False
 
     def test_uncertain_does_not_set_uncertain_on_final_verdict(self):
         client = MagicMock(spec=ModelClient)
-        client.call_single.side_effect = [make_turn(UNCERTAIN_PAYLOAD)] * len(REVIEWER_MODELS)
+        client.call_single.side_effect = [make_turn(UNCERTAIN_PAYLOAD)] * len(TEST_REVIEWER_MODELS)
         verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.uncertain is False
 
@@ -131,7 +132,7 @@ class TestModelEscalation:
         client = MagicMock(spec=ModelClient)
         truncated = '{"passed": false, "findings": [{"file": "a.py", "line": 1, "severity": "major", "message": "cut off mid'
         client.call_single.side_effect = [
-            AgenticTurn(tool_calls=[], content=truncated, model_used=m) for m in REVIEWER_MODELS
+            AgenticTurn(tool_calls=[], content=truncated, model_used=m) for m in TEST_REVIEWER_MODELS
         ]
         verdict = make_agent(client).review(make_task(), make_agent_output(), [], "found", "", original_contents={})
         assert verdict.passed is False

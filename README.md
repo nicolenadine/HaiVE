@@ -111,7 +111,7 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 | `OBSERVABILITY_ENABLED` | no | `false` | Enables OpenTelemetry tracing (with LiteLLM auto-instrumentation) for each run. |
 | `PHOENIX_OTLP_ENDPOINT` | no | `http://localhost:6006/v1/traces` | Where OTel traces are exported when observability is enabled. |
 
-Model tiers (`TIER_LOW_MODELS`, `TIER_MEDIUM_MODELS`, `TIER_HIGH_MODELS`, `REVIEWER_MODELS`) and their attempt counts/context budgets have working defaults spanning Anthropic and OpenAI models; override them the same way if you want a different mix or a single provider. Each value is a comma-separated list of LiteLLM-style model identifiers (e.g. `anthropic/claude-sonnet-4-6,openai/gpt-4o`) — the first is primary, the rest are fallbacks.
+Model tiers (`TIER_LOW_MODELS`, `TIER_MEDIUM_MODELS`, `TIER_HIGH_MODELS`) have working defaults spanning Anthropic and OpenAI models; `REVIEWER_MODELS` defaults to an Anthropic-only escalation ladder (haiku → sonnet → opus, advancing on an "uncertain" verdict). Override any of them the same way if you want a different mix or a single provider. Each value is a comma-separated list of LiteLLM-style model identifiers (e.g. `anthropic/claude-sonnet-4-6,openai/gpt-4o`) — the first is primary, the rest are fallbacks.
 
 Per-agent-role behavior (system prompts, output schemas, max tokens, retry limits) is configured separately in `agents.yaml`, not through `haive config`. haive ships its own bundled agent registry — no per-project setup required — so `haive run`/`haive run-all` work against any target project out of the box.
 

@@ -18,14 +18,18 @@ AGENT_MD_PROSE_WORD_THRESHOLD = 10
 # Max LLM attempts per directory before raising AgentMdGenerationError.
 AGENT_MD_MAX_GENERATION_RETRIES = 3
 # max_tokens passed to the LLM for each agent.md generation call.
-# 200 lines * ~10 tokens/line gives ~2 000 tokens; 2 048 provides headroom.
-AGENT_MD_GENERATION_MAX_TOKENS = 2048
+# 200 lines * ~10 tokens/line gives ~2 000 tokens; raised to 4096 for real
+# headroom rather than the tightest value that happened to work — see the
+# task_executor.py/review_agent.py editor and reviewer budget comments for
+# the concrete incident (a too-tight budget forcing a premature, invalid
+# response) that prompted revisiting every budget/round constant like this.
+AGENT_MD_GENERATION_MAX_TOKENS = 4096
 
 # Code Discovery Agent guardrails.
 # Maximum total tool invocations per discover() call before the agent is forced to emit results.
-CODE_DISCOVERY_MAX_TOOL_CALLS = 20
+CODE_DISCOVERY_MAX_TOOL_CALLS = 30
 # max_tokens for each call_single() in the discovery loop (covers JSON output).
-CODE_DISCOVERY_MAX_TOKENS = 4096
+CODE_DISCOVERY_MAX_TOKENS = 8192
 
 # Repo map for the Orchestrator (FileIndexService.read_repo_map).
 # Token budget for the concatenated agent.md tree handed to the orchestrator —

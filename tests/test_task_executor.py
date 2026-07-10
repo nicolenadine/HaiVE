@@ -53,7 +53,6 @@ def make_tier_config(low_attempts: int = 2, medium_attempts: int = 2) -> TierCon
         medium=make_tier(medium_attempts),
         high=make_tier(1),
         orchestrator=make_tier(1),
-        reviewer=make_tier(1),
     )
 
 
