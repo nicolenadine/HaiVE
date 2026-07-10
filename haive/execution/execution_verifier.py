@@ -16,10 +16,13 @@ from haive.models.execution import CommandResult
 
 class ExecutionCheckResult(BaseModel):
     passed:  bool
-    stage:   Literal["path_safety", "syntax", "import", "command"] | None
+    stage:   Literal["path_safety", "dependency_sync", "syntax", "import", "command"] | None
     summary: str    # embedded in the reviewer's prompt as grounding when passed
     detail:  str    # used as retry_feedback when failed
     results: list[CommandResult] = []
+
+
+_DEPENDENCY_MANIFEST_NAMES = {"pyproject.toml", "uv.lock"}
 
 
 def _module_name(path: str) -> str | None:
@@ -51,6 +54,8 @@ class ExecutionVerifier:
         skip_roles: list[AgentRole],
         import_timeout_seconds: int,
         command_timeout_seconds: int,
+        setup_command: str = "",
+        setup_timeout_seconds: int = 180,
         enabled: bool = True,
     ) -> None:
         self._runner = command_runner
@@ -58,8 +63,10 @@ class ExecutionVerifier:
         self._skip_roles = set(skip_roles)
         self._import_timeout = import_timeout_seconds
         self._command_timeout = command_timeout_seconds
+        self._setup_timeout = setup_timeout_seconds
         self._enabled = enabled
         self._commands = verification_commands or self._auto_detect_commands()
+        self._setup_command = setup_command or self._auto_detect_setup_command()
 
     def _auto_detect_commands(self) -> list[str]:
         if Path(self._root, "tests").is_dir():
@@ -71,11 +78,19 @@ class ExecutionVerifier:
             return [f"{self._resolve_python()} -m pytest -q"]
         return []
 
+    def _auto_detect_setup_command(self) -> str:
+        if Path(self._root, "pyproject.toml").is_file():
+            return "uv sync"
+        return ""
+
     def _resolve_python(self) -> str:
         venv_python = Path(self._root, ".venv", "bin", "python")
         if venv_python.is_file():
             return str(venv_python)
         return sys.executable
+
+    def _venv_missing(self) -> bool:
+        return not Path(self._root, ".venv", "bin", "python").is_file()
 
     def verify(self, changed_paths: list[str], agent_role: AgentRole) -> ExecutionCheckResult:
         if not self._enabled:
@@ -93,6 +108,23 @@ class ExecutionVerifier:
                     stage="path_safety",
                     summary="",
                     detail=f"Path escapes the project root and was rejected: {path_str!r}",
+                    results=results,
+                )
+
+        manifest_changed = any(p in _DEPENDENCY_MANIFEST_NAMES for p in changed_paths)
+        if self._setup_command and (manifest_changed or self._venv_missing()):
+            command = shlex.split(self._setup_command)
+            result = self._runner.run(command, cwd=self._root, timeout_seconds=self._setup_timeout)
+            results.append(result)
+            if not result.timed_out and result.exit_code != 0:
+                return ExecutionCheckResult(
+                    passed=False,
+                    stage="dependency_sync",
+                    summary="",
+                    detail=(
+                        f"Dependency sync command failed: {self._setup_command}\n"
+                        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                    ),
                     results=results,
                 )
 

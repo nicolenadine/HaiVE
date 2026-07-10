@@ -689,6 +689,8 @@ def _run_milestone(
             skip_roles=settings.verification_skip_roles,
             import_timeout_seconds=settings.verification_import_timeout_seconds,
             command_timeout_seconds=settings.verification_command_timeout_seconds,
+            setup_command=settings.verification_setup_command,
+            setup_timeout_seconds=settings.verification_setup_timeout_seconds,
             enabled=settings.verification_enabled,
         )
         executor = TaskExecutor(

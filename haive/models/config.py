@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     verification_import_timeout_seconds: int = 30
     verification_command_timeout_seconds: int = 120
 
+    # Dependency sync — runs before the import/command checks whenever the
+    # target project's dependency manifest (pyproject.toml/uv.lock) changed in
+    # the current attempt, or no .venv exists yet, so the installed
+    # environment never silently drifts from what the code now imports.
+    # Empty string auto-detects: "uv sync" if pyproject.toml is present, else
+    # no dependency-sync stage at all.
+    verification_setup_command: str = ""
+    verification_setup_timeout_seconds: int = 180
+
     # Recovery
     max_recovery_depth: int = 3
     max_family_attempts: int = 15

@@ -12,6 +12,7 @@ def make_verifier(
     verification_commands: list[str] | None = None,
     skip_roles: list[AgentRole] | None = None,
     enabled: bool = True,
+    setup_command: str = "",
 ) -> ExecutionVerifier:
     return ExecutionVerifier(
         CommandRunner(),
@@ -20,6 +21,8 @@ def make_verifier(
         skip_roles=skip_roles or [],
         import_timeout_seconds=_TIMEOUT,
         command_timeout_seconds=_TIMEOUT,
+        setup_command=setup_command,
+        setup_timeout_seconds=_TIMEOUT,
         enabled=enabled,
     )
 
@@ -36,6 +39,59 @@ class TestPathSafety:
         verifier = make_verifier(tmp_path)
         result = verifier.verify(["ok.py"], AgentRole.CODE_EDITOR_AGENT)
         assert result.stage != "path_safety"
+
+
+class TestDependencySync:
+    def test_auto_detects_uv_sync_when_pyproject_present(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
+        verifier = make_verifier(tmp_path)
+        assert verifier._setup_command == "uv sync"
+
+    def test_no_setup_command_when_no_pyproject(self, tmp_path):
+        verifier = make_verifier(tmp_path)
+        assert verifier._setup_command == ""
+
+    def test_explicit_setup_command_overrides_auto_detect(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
+        verifier = make_verifier(tmp_path, setup_command="true")
+        assert verifier._setup_command == "true"
+
+    def test_runs_when_venv_missing_and_manifest_present(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
+        (tmp_path / "ok.py").write_text("x = 1\n")
+        verifier = make_verifier(tmp_path, setup_command="false")
+        result = verifier.verify(["ok.py"], AgentRole.CODE_EDITOR_AGENT)
+        assert result.passed is False
+        assert result.stage == "dependency_sync"
+
+    def test_runs_when_manifest_changed_even_if_venv_present(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
+        venv_bin = tmp_path / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").write_text("#!/bin/sh\n")
+        (venv_bin / "python").chmod(0o755)
+        verifier = make_verifier(tmp_path, setup_command="false")
+        result = verifier.verify(["pyproject.toml"], AgentRole.CODE_EDITOR_AGENT)
+        assert result.passed is False
+        assert result.stage == "dependency_sync"
+
+    def test_skipped_when_manifest_unchanged_and_venv_present(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
+        venv_bin = tmp_path / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").write_text("#!/bin/sh\n")
+        (venv_bin / "python").chmod(0o755)
+        (tmp_path / "ok.py").write_text("x = 1\n")
+        verifier = make_verifier(tmp_path, setup_command="false")
+        result = verifier.verify(["ok.py"], AgentRole.CODE_EDITOR_AGENT)
+        assert result.passed is True
+
+    def test_passing_setup_command_allows_success(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
+        (tmp_path / "ok.py").write_text("x = 1\n")
+        verifier = make_verifier(tmp_path, setup_command="true")
+        result = verifier.verify(["ok.py"], AgentRole.CODE_EDITOR_AGENT)
+        assert result.passed is True
 
 
 class TestSyntaxCheck:
