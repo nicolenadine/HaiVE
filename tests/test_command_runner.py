@@ -65,7 +65,7 @@ class TestSanitization:
 
     def test_long_output_is_truncated(self, tmp_path):
         result = CommandRunner().run(
-            ["python3", "-c", "print('x' * 5000)"], cwd=str(tmp_path), timeout_seconds=5
+            ["python3", "-c", "print('x' * 20000)"], cwd=str(tmp_path), timeout_seconds=5
         )
-        assert len(result.stdout) < 5000
+        assert len(result.stdout) < 20000
         assert result.stdout.endswith("[truncated]")

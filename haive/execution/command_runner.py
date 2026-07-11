@@ -5,7 +5,13 @@ import time
 
 from haive.models.execution import CommandResult
 
-_TRUNCATE_CHARS = 2000
+# A full pytest -q report with several failures easily exceeds a couple
+# thousand characters of traceback text -- at 2000 this silently cut a real
+# failure report off after only two named failures, hiding the rest of what
+# broke from both the retrying agent and this file's own postmortem. Raised
+# generously (matching every other too-tight budget found this session)
+# rather than re-guessing a "probably enough" number.
+_TRUNCATE_CHARS = 8000
 _REDACTED = "[REDACTED]"
 
 
