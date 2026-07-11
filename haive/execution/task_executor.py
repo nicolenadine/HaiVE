@@ -12,6 +12,7 @@ from haive.discovery.file_index_service import FileIndexService
 from haive.discovery.git_utils import get_changed_files
 from haive.discovery.path_safety import resolve_within_root
 from haive.execution.context_assembler import ContextAssembler
+from haive.execution.dependency_approval import DependencyApprovalGate
 from haive.execution.execution_verifier import ExecutionVerifier
 from haive.execution.output_validator import OutputValidationError, OutputValidator
 from haive.execution.read_file_tool import run_tool_loop
@@ -24,7 +25,7 @@ from haive.models.agent_output import ScaffoldAgentOutput
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.review import ReviewVerdict
 from haive.models.state import ProjectState
-from haive.models.task import AttemptLogEntry, Task, TaskExecutionRecord
+from haive.models.task import AttemptLogEntry, Task, TaskExecutionRecord, VerdictSummary
 from haive.observability.spans import task_span
 from haive.persistence.state_store import StateStore
 from haive.registry.agent_registry import AgentRegistry
@@ -67,6 +68,7 @@ class TaskExecutor:
         tier_config: TierConfig,
         review_agent: ReviewAgent,
         execution_verifier: ExecutionVerifier,
+        dependency_approval_gate: DependencyApprovalGate,
         root: str,
         project_branch: str,
         auto_merge: bool = True,
@@ -76,6 +78,7 @@ class TaskExecutor:
         self._tier_config = tier_config
         self._review_agent = review_agent
         self._execution_verifier = execution_verifier
+        self._dependency_approval_gate = dependency_approval_gate
         self._root = root
         self._project_branch = project_branch
         self._auto_merge = auto_merge
@@ -247,6 +250,29 @@ class TaskExecutor:
 
                         _apply_output(agent_output, self._root)
                         real_changed_files = get_changed_files(self._root)
+
+                        approval_result = self._dependency_approval_gate.check(
+                            real_changed_files, original_contents
+                        )
+                        if approval_result.warning:
+                            self._on_status(f"  [#{task.task_id}] WARNING: {approval_result.warning}")
+                        if not approval_result.approved:
+                            unapproved = ", ".join(approval_result.unapproved_dependencies)
+                            self._on_status(
+                                f"  [#{task.task_id}] unapproved new dependency ({unapproved}) — needs human review"
+                            )
+                            reason = f"Unapproved new dependency: {unapproved}"
+                            record.attempt_log.append(
+                                AttemptLogEntry(tier=complexity, attempt=attempt_num, reason=reason)
+                            )
+                            record.verdict = VerdictSummary(passed=False, reason=reason)
+                            pm.add_comment(task.task_id, _format_dependency_approval_summary(approval_result.unapproved_dependencies))
+                            pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
+                            record.total_attempts = attempt_num
+                            record.executor_end = _utcnow()
+                            state_store.merge_task_record(project_id, task.task_id, record)
+                            vcs.reset_working_tree(task_branch)
+                            return record
 
                         exec_result = self._execution_verifier.verify(real_changed_files, task.agent_role)
                         if not exec_result.passed:
@@ -528,6 +554,18 @@ def _format_infeasible_summary(reason: str) -> str:
         "implementation, given the current code architecture — this is not an implementation "
         "mistake. The task's scope or acceptance criteria need to be revised.\n\n"
         f"Reviewer's reasoning: {reason}"
+    )
+
+
+def _format_dependency_approval_summary(unapproved_dependencies: list[str]) -> str:
+    names = ", ".join(unapproved_dependencies)
+    return (
+        "**haive: new dependency requires human approval**\n\n"
+        f"This task attempted to add a dependency not on this project's approved list "
+        f"(`.haive/allowed_dependencies.txt`): {names}.\n\n"
+        "If this dependency is genuinely needed, add it to the allowlist and re-run this "
+        "task. If it's a mistake (e.g. a typo of an already-approved package), correct the "
+        "task or its acceptance criteria instead."
     )
 
 

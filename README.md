@@ -109,6 +109,7 @@ Set via `haive config set KEY VALUE` in the active config. Required keys are mar
 | `VERIFICATION_ENABLED` | no | `true` | Runs cheap, deterministic checks (path safety, syntax, imports, and any `VERIFICATION_COMMANDS`) against a submission before the LLM reviewer is called — a failure here costs no reviewer call. Disable for a target project this doesn't apply well to (e.g. non-Python). |
 | `VERIFICATION_COMMANDS` | no | auto-detected | Comma-separated commands run against the target project as part of verification (e.g. `python -m pytest -q,ruff check .`). Commands come only from this setting, never from the LLM. Empty (default) auto-detects a `tests/` directory and runs `python -m pytest -q` if found, else nothing. |
 | `VERIFICATION_SETUP_COMMAND` | no | auto-detected | Command run to sync the target project's installed dependencies with its manifest before the import/command checks, whenever an agent's changes touch `pyproject.toml`/`uv.lock` or no `.venv` exists yet — keeps the environment from silently drifting out of date as a build adds new dependencies. Empty (default) auto-detects `uv sync` if `pyproject.toml` is present, else no dependency-sync stage. |
+| `DEPENDENCY_APPROVAL_ENABLED` | no | `true` | A task that adds a dependency to `pyproject.toml` not listed in the target repo's `.haive/allowed_dependencies.txt` is routed straight to `needs_human_review` instead of being installed — no retry, since no amount of retrying lets an agent grant itself approval. Set up the allowlist during project planning, before running haive, the same way milestones are. Missing allowlist file: the gate is skipped (a warning is logged) rather than treated as "nothing approved". |
 | `OBSERVABILITY_ENABLED` | no | `false` | Enables OpenTelemetry tracing (with LiteLLM auto-instrumentation) for each run. |
 | `PHOENIX_OTLP_ENDPOINT` | no | `http://localhost:6006/v1/traces` | Where OTel traces are exported when observability is enabled. |
 
@@ -156,3 +157,7 @@ build/
 ```
 
 Add any other directories that are not part of your project's source (test fixtures, generated code, vendor directories, etc.). The quality of haive's context retrieval is directly proportional to the accuracy of your `.gitignore`.
+
+### Dependency allowlist
+
+If your project uses `pyproject.toml`, set up `.haive/allowed_dependencies.txt` before running haive, the same way you set up milestones — one package name per line, `#` comments allowed. This is the set of dependencies you expect the build to need, decided during planning. A task that declares a dependency not on this list is routed to `needs_human_review` instead of being auto-installed (see `DEPENDENCY_APPROVAL_ENABLED`); if the allowlist file doesn't exist at all, this check is skipped with a warning rather than blocking every dependency change.

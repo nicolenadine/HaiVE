@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     verification_setup_command: str = ""
     verification_setup_timeout_seconds: int = 180
 
+    # Dependency approval — a brand-new dependency (declared in pyproject.toml
+    # but absent from .haive/allowed_dependencies.txt in the target repo) is
+    # never auto-installed; the task is routed to human review instead, since
+    # no amount of retrying lets an agent grant itself approval. Missing
+    # allowlist file: gate is skipped (warning logged), not treated as
+    # "nothing approved" — see decisions.md for the planned "strict" mode.
+    dependency_approval_enabled: bool = True
+
     # Recovery
     max_recovery_depth: int = 3
     max_family_attempts: int = 15

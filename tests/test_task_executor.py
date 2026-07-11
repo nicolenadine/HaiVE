@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from haive.execution.dependency_approval import DependencyApprovalGate
 from haive.execution.execution_verifier import ExecutionCheckResult, ExecutionVerifier
 from haive.execution.output_validator import OutputValidationError
 from haive.execution.review_agent import ReviewAgent
@@ -132,6 +133,7 @@ def make_executor(
         tier_config=make_tier_config(low_attempts, medium_attempts),
         review_agent=MagicMock(spec=ReviewAgent),
         execution_verifier=execution_verifier,
+        dependency_approval_gate=DependencyApprovalGate(str(tmp_path)),
         root=str(tmp_path),
         project_branch="main",
         auto_merge=auto_merge,
@@ -623,6 +625,73 @@ class TestExecutionVerification:
         second_call_originals = executor._review_agent.review.call_args_list[1].kwargs["original_contents"]
         assert first_call_originals["haive/client.py"] == "class Client:\n    original = True\n"
         assert second_call_originals["haive/client.py"] == "class Client:\n    original = True\n"
+
+
+class TestDependencyApproval:
+    def test_unapproved_new_dependency_stops_immediately_without_review(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "demo"\ndependencies = ["requests"]\n'
+        )
+        (tmp_path / ".haive").mkdir()
+        (tmp_path / ".haive" / "allowed_dependencies.txt").write_text("requests\n")
+        executor = make_executor(tmp_path, low_attempts=2, medium_attempts=2)
+        svc = make_services(tmp_path)
+
+        payload = {
+            "edits": [{
+                "path": "pyproject.toml",
+                "content": '[project]\nname = "demo"\ndependencies = ["requests", "sketchy-pkg"]\n',
+            }],
+            "notes": "",
+        }
+        executor._model_client.call_single.return_value = AgenticTurn(
+            tool_calls=[], content=json.dumps(payload), model_used="test-model"
+        )
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+
+        record = executor.run(make_task(complexity=Complexity.LOW), **svc)
+
+        assert executor._model_client.call_single.call_count == 1
+        assert executor._review_agent.review.call_count == 0
+        svc["pm"].update_status.assert_called_with("42", TaskStatus.NEEDS_HUMAN_REVIEW)
+        svc["pm"].add_comment.assert_called_once()
+        comment = svc["pm"].add_comment.call_args.args[1]
+        assert "sketchy-pkg" in comment
+        assert record.total_attempts == 1
+        assert record.verdict is not None
+        assert record.verdict.passed is False
+        svc["vcs"].reset_working_tree.assert_called_once_with("haive/task-42")
+
+    def test_approved_new_dependency_proceeds_to_review(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "demo"\ndependencies = ["requests"]\n'
+        )
+        (tmp_path / ".haive").mkdir()
+        (tmp_path / ".haive" / "allowed_dependencies.txt").write_text("requests\npydantic\n")
+        executor = make_executor(tmp_path)
+        svc = make_services(tmp_path)
+
+        payload = {
+            "edits": [{
+                "path": "pyproject.toml",
+                "content": '[project]\nname = "demo"\ndependencies = ["requests", "pydantic"]\n',
+            }],
+            "notes": "",
+        }
+        executor._model_client.call_single.return_value = AgenticTurn(
+            tool_calls=[], content=json.dumps(payload), model_used="test-model"
+        )
+        executor._review_agent.review.return_value = make_passing_review()
+        svc["discovery_agent"].discover.return_value = make_discovery_result()
+        svc["file_index"].load_sections.return_value = []
+        svc["vcs"].create_pr.return_value = "pr-1"
+
+        record = executor.run(make_task(), **svc)
+
+        assert executor._review_agent.review.call_count == 1
+        assert record.verdict is not None
+        assert record.verdict.passed is True
 
 
 # ── tier escalation ───────────────────────────────────────────────────────────

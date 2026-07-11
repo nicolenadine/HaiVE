@@ -593,6 +593,7 @@ def _run_milestone(
     from haive.discovery.code_discovery_agent import CodeDiscoveryAgent
     from haive.discovery.file_index_service import FileIndexService
     from haive.execution.command_runner import CommandRunner
+    from haive.execution.dependency_approval import DependencyApprovalGate
     from haive.execution.execution_verifier import ExecutionVerifier
     from haive.execution.review_agent import ReviewAgent
     from haive.execution.task_executor import TaskExecutor
@@ -693,8 +694,12 @@ def _run_milestone(
             setup_timeout_seconds=settings.verification_setup_timeout_seconds,
             enabled=settings.verification_enabled,
         )
+        dependency_approval_gate = DependencyApprovalGate(
+            root, enabled=settings.dependency_approval_enabled,
+        )
         executor = TaskExecutor(
-            model_client, tier_config, review_agent, execution_verifier, root, project_branch,
+            model_client, tier_config, review_agent, execution_verifier,
+            dependency_approval_gate, root, project_branch,
             auto_merge=settings.auto_merge,
             on_status=typer.echo,
         )
