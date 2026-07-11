@@ -23,6 +23,7 @@ from haive.models.task import Task
 # ---------------------------------------------------------------------------
 
 _TIER = Tier(models=["test-model"], max_attempts=1, context_budget=8000)
+_ESCALATION_TIER = Tier(models=["escalation-model"], max_attempts=1, context_budget=8000)
 
 
 def _make_task(
@@ -92,11 +93,19 @@ cli.py — Typer CLI entry point for the haive harness
 
 @pytest.fixture
 def repo_root():
-    """Temp directory tree with agent.md files at root, models/, and cli/."""
+    """Temp directory tree with agent.md files at root, models/, and cli/.
+
+    Also creates the real source files those agent.md files describe (just
+    "task.py", the one tests actually reference) -- CodeDiscoveryAgent now
+    verifies a discovered file exists before trusting it, so a test asserting
+    a section survives must back it with a real file, the same way a
+    genuinely accurate agent.md would.
+    """
     with tempfile.TemporaryDirectory() as root:
         Path(root, "agent.md").write_text(_ROOT_AGENT_MD)
         Path(root, "models").mkdir()
         Path(root, "models", "agent.md").write_text(_MODELS_AGENT_MD)
+        Path(root, "models", "task.py").write_text("class Task:\n    pass\n")
         Path(root, "cli").mkdir()
         Path(root, "cli", "agent.md").write_text(_CLI_AGENT_MD)
         yield root
@@ -110,6 +119,11 @@ def mock_client():
 @pytest.fixture
 def agent(mock_client):
     return CodeDiscoveryAgent(mock_client, _TIER)
+
+
+@pytest.fixture
+def escalating_agent(mock_client):
+    return CodeDiscoveryAgent(mock_client, _TIER, escalation_tier=_ESCALATION_TIER)
 
 
 # ---------------------------------------------------------------------------
@@ -379,3 +393,92 @@ class TestToolExecution:
         tool_msg = next(m for m in second_call_messages if m["role"] == "tool")
         assert "Access denied" in tool_msg["content"]
         assert result.status == "empty"
+
+
+# ---------------------------------------------------------------------------
+# Escalation: a demonstrated problem earns a stronger model, not every call
+# ---------------------------------------------------------------------------
+
+class TestEscalation:
+    def test_healthy_result_never_escalates(self, escalating_agent, mock_client, repo_root):
+        mock_client.call_single.side_effect = [
+            _turn_with_content(_found_json("models/task.py")),
+        ]
+
+        result = escalating_agent.discover(_make_task(), repo_root, token_budget=4000)
+
+        assert result.sections[0].file == "models/task.py"
+        assert mock_client.call_single.call_count == 1
+
+    def test_escalates_when_returned_file_does_not_exist(
+        self, escalating_agent, mock_client, repo_root
+    ):
+        mock_client.call_single.side_effect = [
+            _turn_with_content(_found_json("models/nonexistent.py")),
+            _turn_with_content(_found_json("models/task.py")),
+        ]
+
+        result = escalating_agent.discover(_make_task(), repo_root, token_budget=4000)
+
+        assert len(result.sections) == 1
+        assert result.sections[0].file == "models/task.py"
+        assert mock_client.call_single.call_count == 2
+        escalated_call = mock_client.call_single.call_args_list[1]
+        assert escalated_call.kwargs["tier"] is _ESCALATION_TIER
+
+    def test_escalates_on_empty_unexpected_then_finds_result(
+        self, escalating_agent, mock_client, repo_root
+    ):
+        mock_client.call_single.side_effect = [
+            _turn_with_content(_EMPTY_JSON),
+            _turn_with_content(_found_json("models/task.py")),
+        ]
+
+        result = escalating_agent.discover(
+            _make_task(agent_role=AgentRole.IMPLEMENTATION_AGENT), repo_root, token_budget=4000
+        )
+
+        assert result.status == "found"
+        assert result.sections[0].file == "models/task.py"
+        assert mock_client.call_single.call_count == 2
+
+    def test_no_escalation_for_scaffold_role_even_if_empty(
+        self, escalating_agent, mock_client, repo_root
+    ):
+        mock_client.call_single.side_effect = [_turn_with_content(_EMPTY_JSON)]
+
+        result = escalating_agent.discover(
+            _make_task(agent_role=AgentRole.SCAFFOLD_AGENT), repo_root, token_budget=4000
+        )
+
+        assert result.status == "empty"
+        assert mock_client.call_single.call_count == 1
+
+    def test_still_missing_after_escalation_is_dropped_not_raised(
+        self, escalating_agent, mock_client, repo_root
+    ):
+        mock_client.call_single.side_effect = [
+            _turn_with_content(_found_json("models/nonexistent.py")),
+            _turn_with_content(_found_json("models/still_nonexistent.py")),
+        ]
+
+        result = escalating_agent.discover(_make_task(), repo_root, token_budget=4000)
+
+        assert result.sections == []
+        assert result.status == "empty"
+        assert mock_client.call_single.call_count == 2
+
+    def test_non_escalating_agent_drops_missing_file_without_retry(
+        self, agent, mock_client, repo_root
+    ):
+        # `agent` (no escalation_tier configured) must never attempt a second
+        # call, even when the first result names a nonexistent file.
+        mock_client.call_single.side_effect = [
+            _turn_with_content(_found_json("models/nonexistent.py")),
+        ]
+
+        result = agent.discover(_make_task(), repo_root, token_budget=4000)
+
+        assert result.sections == []
+        assert result.status == "empty"
+        assert mock_client.call_single.call_count == 1

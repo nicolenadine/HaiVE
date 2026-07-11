@@ -9,7 +9,7 @@ import pytest
 from haive.adapters.pm.base import PMAdapter
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.task import Task, TaskExecutionRecord, VerdictSummary
-from haive.orchestration.task_scheduler import MAX_EXECUTORS, TaskScheduler
+from haive.orchestration.task_scheduler import TaskScheduler
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ def failing_factory(task: Task) -> TaskExecutionRecord:
 # ── concurrency cap ───────────────────────────────────────────────────────────
 
 class TestConcurrencyCap:
-    def test_at_most_max_executors_run_simultaneously(self):
+    def _track_concurrency(self, max_executors: int, task_count: int = 5) -> int:
         active = 0
         max_active = 0
         lock = threading.Lock()
@@ -61,10 +61,40 @@ class TestConcurrencyCap:
                 active -= 1
             return make_record(task.task_id)
 
-        tasks = [make_task(str(i)) for i in range(5)]
+        tasks = [make_task(str(i)) for i in range(task_count)]
+        TaskScheduler(max_executors=max_executors).start(tasks, factory, pm=MagicMock(spec=PMAdapter))
+        return max_active
+
+    def test_at_most_max_executors_run_simultaneously(self):
+        assert self._track_concurrency(max_executors=2) <= 2
+
+    def test_max_executors_is_configurable_not_hardcoded(self):
+        # Regression test: TaskScheduler() used to ignore its constructor
+        # entirely, always capping at a hardcoded module constant regardless
+        # of Settings.max_executors — this proves the constructor arg is what
+        # actually controls concurrency now.
+        assert self._track_concurrency(max_executors=1) <= 1
+        assert self._track_concurrency(max_executors=4, task_count=8) > 1
+
+    def test_default_max_executors_is_four(self):
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def factory(task: Task) -> TaskExecutionRecord:
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return make_record(task.task_id)
+
+        tasks = [make_task(str(i)) for i in range(8)]
         TaskScheduler().start(tasks, factory, pm=MagicMock(spec=PMAdapter))
 
-        assert max_active <= MAX_EXECUTORS
+        assert max_active <= 4
 
     def test_all_independent_tasks_eventually_complete(self):
         completed: list[str] = []

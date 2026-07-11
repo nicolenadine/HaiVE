@@ -440,7 +440,7 @@ def discover(
     task = types.SimpleNamespace(title=task_title, description=description)
 
     tier_config = TierConfig.from_settings(settings)
-    agent = CodeDiscoveryAgent(ModelClient(settings), tier_config.low)
+    agent = CodeDiscoveryAgent(ModelClient(settings), tier_config.low, escalation_tier=tier_config.medium)
 
     if verbose:
         original_parse = agent._parse_result
@@ -514,7 +514,7 @@ def load(
 
     tier_config = TierConfig.from_settings(settings)
     client = ModelClient(settings)
-    agent = CodeDiscoveryAgent(client, tier_config.low)
+    agent = CodeDiscoveryAgent(client, tier_config.low, escalation_tier=tier_config.medium)
     service = FileIndexService(client, tier_config.low)
 
     typer.echo(f'Loading context for: "{task_title}"\n')
@@ -616,7 +616,6 @@ def _run_milestone(
 
     try:
         settings = load_settings()
-        settings.dry_run = dry_run
         settings.auto_merge = not no_merge
 
         if settings.observability_enabled:
@@ -642,7 +641,7 @@ def _run_milestone(
             )
             raise typer.Exit(code=1)
 
-        discovery_agent = CodeDiscoveryAgent(model_client, tier_config.low)
+        discovery_agent = CodeDiscoveryAgent(model_client, tier_config.low, escalation_tier=tier_config.medium)
         file_index = FileIndexService(model_client, tier_config.low)
 
         # Each milestone gets its own dedicated, long-lived branch — created
@@ -942,7 +941,7 @@ def _run_milestone(
 
                 if not quiet:
                     typer.echo("\nRunning tasks...")
-                scheduler = TaskScheduler()
+                scheduler = TaskScheduler(max_executors=settings.max_executors)
                 scheduler.start(all_tasks, executor_factory, pm, on_complete=on_task_complete)
 
                 final_tasks = pm.get_tasks(milestone_id)

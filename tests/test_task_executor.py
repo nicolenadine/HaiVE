@@ -321,12 +321,14 @@ class TestMergeFailure:
         svc["file_index"].load_sections.return_value = []
         svc["vcs"].push_commits.side_effect = RuntimeError("git push failed: network error")
 
-        with pytest.raises(RuntimeError, match="network error"):
-            executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
-        # The original exception still propagates, but the local repo must not
-        # be left stuck on the task branch — checkout_branch always runs.
+        # The exception is isolated to this task (marked needs-human-review,
+        # not raised), but the local repo must not be left stuck on the task
+        # branch — checkout_branch always runs.
         svc["vcs"].checkout_branch.assert_called_once_with("main")
+        svc["pm"].update_status.assert_called_with("42", TaskStatus.NEEDS_HUMAN_REVIEW)
+        assert "network error" in svc["pm"].add_comment.call_args.args[1]
 
     def test_checkout_branch_runs_when_verdict_is_infeasible(self, tmp_path):
         executor = make_executor(tmp_path)
@@ -893,7 +895,7 @@ class TestAPIErrorHandling:
 
         assert record.total_attempts == 1
 
-    def test_consecutive_api_errors_exceeding_max_reraises(self, tmp_path):
+    def test_consecutive_api_errors_exceeding_max_is_isolated_to_this_task(self, tmp_path):
         executor = make_executor(tmp_path, low_attempts=5)
         svc = make_services(tmp_path)
 
@@ -901,14 +903,16 @@ class TestAPIErrorHandling:
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
 
-        with pytest.raises(APIError):
-            executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
-    def test_reraised_api_error_resets_status_to_pending_not_stuck_in_progress(self, tmp_path):
+        svc["pm"].update_status.assert_called_with("42", TaskStatus.NEEDS_HUMAN_REVIEW)
+        assert record is not None
+
+    def test_reraised_api_error_marks_needs_human_review_without_raising(self, tmp_path):
         # Regression test: any exception that escapes _run_inner after
-        # IN_PROGRESS was set must reset the task back to PENDING, or it's
-        # stuck forever — the scheduler only ever re-schedules PENDING
-        # tasks, and nothing else revisits an IN_PROGRESS one.
+        # IN_PROGRESS was set used to keep propagating, crashing the entire
+        # multi-task run — the scheduler had no way to isolate it. Now it's
+        # caught, marked needs-human-review, and the run continues.
         executor = make_executor(tmp_path, low_attempts=5)
         svc = make_services(tmp_path)
 
@@ -916,26 +920,31 @@ class TestAPIErrorHandling:
         svc["discovery_agent"].discover.return_value = make_discovery_result()
         svc["file_index"].load_sections.return_value = []
 
-        with pytest.raises(APIError):
-            executor.run(make_task(), **svc)
+        executor.run(make_task(), **svc)
 
         statuses = [call.args[1] for call in svc["pm"].update_status.call_args_list]
         assert statuses[0] == TaskStatus.IN_PROGRESS
-        assert statuses[-1] == TaskStatus.PENDING
+        assert statuses[-1] == TaskStatus.NEEDS_HUMAN_REVIEW
+        assert "persistent failure" in svc["pm"].add_comment.call_args.args[1]
 
 
-class TestUnexpectedExceptionResetsStatus:
-    def test_exception_from_create_branch_resets_status_to_pending(self, tmp_path):
-        # This is the exact real-world scenario that stranded a task at
-        # IN_PROGRESS: vcs.create_branch() raised before the tier loop (and
-        # its own try/finally) even started, bypassing every existing
-        # cleanup path entirely.
+class TestUnexpectedExceptionIsolatedToThisTask:
+    def test_exception_from_create_branch_marks_needs_human_review_without_raising(self, tmp_path):
+        # This is the exact real-world scenario that used to crash the
+        # entire multi-task run: vcs.create_branch() raised before the tier
+        # loop (and its own try/finally) even started, and the exception
+        # propagated all the way up through TaskScheduler, aborting every
+        # other task in the wave. Now it's isolated to this one task.
         executor = make_executor(tmp_path)
         svc = make_services(tmp_path)
         svc["vcs"].create_branch.side_effect = RuntimeError("git command failed")
 
-        with pytest.raises(RuntimeError, match="git command failed"):
-            executor.run(make_task(), **svc)
+        record = executor.run(make_task(), **svc)
 
         statuses = [call.args[1] for call in svc["pm"].update_status.call_args_list]
-        assert statuses == [TaskStatus.IN_PROGRESS, TaskStatus.PENDING]
+        assert statuses == [TaskStatus.IN_PROGRESS, TaskStatus.NEEDS_HUMAN_REVIEW]
+        assert record.total_attempts == 0
+        svc["pm"].add_comment.assert_called_once()
+        comment = svc["pm"].add_comment.call_args.args[1]
+        assert "unexpected error" in comment.lower()
+        assert "git command failed" in comment

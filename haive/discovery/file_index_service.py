@@ -123,8 +123,11 @@ class FileIndexService:
         next section would push the accumulated token count over token_budget;
         all remaining sections are dropped silently.
 
-        Raises FileNotFoundError with a descriptive message if a discovered
-        file does not exist on disk.
+        A section whose file doesn't exist on disk is skipped, not raised --
+        CodeDiscoveryAgent already validates and (when configured) escalates
+        on this before returning, so this is defense in depth: a discovery
+        agent occasionally naming a nonexistent file is a foreseeable,
+        recoverable outcome, not grounds to abort the whole task.
         """
         loaded: list[LoadedSection] = []
         tokens_used = 0
@@ -132,9 +135,7 @@ class FileIndexService:
         for section in result.sections:
             full_path = Path(root) / section.file
             if not full_path.is_file():
-                raise FileNotFoundError(
-                    f"Discovered file no longer exists: {section.file!r}"
-                )
+                continue
 
             text = full_path.read_text(encoding="utf-8")
 

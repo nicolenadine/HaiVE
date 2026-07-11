@@ -98,7 +98,6 @@ class Settings(BaseSettings):
     phoenix_otlp_endpoint: str = "http://localhost:6006/v1/traces"
 
     # Runtime flags
-    dry_run: bool = False
     auto_merge: bool = True
 
     # Providers

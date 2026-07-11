@@ -436,10 +436,24 @@ class TestLoadSections:
         loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
         assert loaded[0].source == "b\nc\nd\n"
 
-    def test_missing_file_raises_file_not_found(self, service, tmp_path):
+    def test_missing_file_is_skipped_not_raised(self, service, tmp_path):
+        # CodeDiscoveryAgent already validates/escalates on this before
+        # returning; this is defense in depth, not the primary guard —
+        # a nonexistent file is a foreseeable, recoverable outcome, not
+        # grounds to abort the whole task.
         result = _result(_section("ghost.py", full=True))
-        with pytest.raises(FileNotFoundError, match="ghost.py"):
-            service.load_sections(result, str(tmp_path), token_budget=10000)
+        loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
+        assert loaded == []
+
+    def test_missing_file_among_others_does_not_block_the_rest(self, service, tmp_path):
+        (tmp_path / "real.py").write_text("x = 1\n")
+        result = _result(
+            _section("ghost.py", full=True),
+            _section("real.py", full=True),
+        )
+        loaded = service.load_sections(result, str(tmp_path), token_budget=10000)
+        assert len(loaded) == 1
+        assert loaded[0].file == "real.py"
 
     def test_sections_dropped_when_budget_exceeded(self, service, tmp_path):
         # Each file is ~100 chars → ~25 tokens. Budget of 30 fits only the first.

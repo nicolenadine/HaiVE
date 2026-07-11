@@ -7,8 +7,6 @@ from haive.adapters.pm.base import PMAdapter
 from haive.models.enums import TaskStatus
 from haive.models.task import Task, TaskExecutionRecord
 
-MAX_EXECUTORS = 2
-
 
 class TaskScheduler:
     """Schedules concurrent task execution respecting dependency ordering.
@@ -21,9 +19,12 @@ class TaskScheduler:
     Usage::
 
         factory = lambda task: executor.run(task, project_id, state_store.load_or_init(project_id), ...)
-        scheduler = TaskScheduler()
+        scheduler = TaskScheduler(max_executors=settings.max_executors)
         scheduler.start(tasks, factory, pm=pm_adapter)
     """
+
+    def __init__(self, max_executors: int = 4) -> None:
+        self._max_executors = max_executors
 
     def start(
         self,
@@ -49,7 +50,7 @@ class TaskScheduler:
             t.task_id: t for t in tasks if t.status == TaskStatus.PENDING
         }
         running: set[asyncio.Task[TaskExecutionRecord]] = set()
-        semaphore = asyncio.Semaphore(MAX_EXECUTORS)
+        semaphore = asyncio.Semaphore(self._max_executors)
 
         while unscheduled or running:
             ready = [t for t in unscheduled.values() if self._is_ready(t, statuses)]

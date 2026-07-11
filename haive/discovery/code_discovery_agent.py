@@ -11,7 +11,7 @@ from haive.discovery.path_safety import resolve_within_root
 from haive.llm.agentic_turn import AgenticTurn, ToolCall
 from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
-from haive.models.discovery import DiscoveredSection, DiscoveryResult
+from haive.models.discovery import DiscoveredSection, DiscoveryResult, classify_discovery_status
 from haive.models.enums import AgentRole
 from haive.models.task import Task
 
@@ -81,15 +81,51 @@ class CodeDiscoveryAgent:
 
     Uses LLM tool calling with two tools (read_agent_md, list_subdirectories)
     to explore the repo top-down. Bounded by CODE_DISCOVERY_MAX_TOOL_CALLS.
-    Returns DiscoveryResult(sections=[], status="empty") rather than raising
-    when nothing is found or the LLM output cannot be parsed.
+    Never raises when nothing is found, the LLM output cannot be parsed, or a
+    returned file turns out not to exist — the caller always gets back a
+    result it can safely trust, at the cost of possibly fewer sections than
+    the model claimed.
+
+    Runs at `tier` by default. If `escalation_tier` is given and the first
+    pass either finds nothing for a role where that's unusual
+    (`classify_discovery_status` -> "empty_unexpected") or names a file that
+    doesn't actually exist, discovery is retried once at `escalation_tier`
+    before trusting the result -- a demonstrated failure earns a stronger
+    model, rather than paying for one on every call regardless of need.
     """
 
-    def __init__(self, model_client: ModelClient, tier: Tier) -> None:
+    def __init__(
+        self, model_client: ModelClient, tier: Tier, escalation_tier: Tier | None = None
+    ) -> None:
         self._client = model_client
         self._tier = tier
+        self._escalation_tier = escalation_tier
 
     def discover(self, task: Task, root: str, token_budget: int) -> DiscoveryResult:
+        result = self._discover_once(task, root, self._tier)
+
+        if self._escalation_tier is not None and self._should_escalate(result, task, root):
+            result = self._discover_once(task, root, self._escalation_tier)
+
+        return self._drop_missing_files(result, root)
+
+    def _should_escalate(self, result: DiscoveryResult, task: Task, root: str) -> bool:
+        if classify_discovery_status(result, task.agent_role) == "empty_unexpected":
+            return True
+        return any(not self._file_exists(root, s.file) for s in result.sections)
+
+    @staticmethod
+    def _file_exists(root: str, file: str) -> bool:
+        safe = resolve_within_root(file, root)
+        return safe is not None and safe.is_file()
+
+    def _drop_missing_files(self, result: DiscoveryResult, root: str) -> DiscoveryResult:
+        valid = [s for s in result.sections if self._file_exists(root, s.file)]
+        if len(valid) == len(result.sections):
+            return result
+        return DiscoveryResult(sections=valid, status="found" if valid else "empty")
+
+    def _discover_once(self, task: Task, root: str, tier: Tier) -> DiscoveryResult:
         messages: list[dict] = [
             {"role": "system", "content": _build_system_prompt()},
             {"role": "user", "content": _build_user_prompt(task)},
@@ -98,7 +134,7 @@ class CodeDiscoveryAgent:
 
         while tool_call_count < CODE_DISCOVERY_MAX_TOOL_CALLS:
             turn = self._client.call_single(
-                tier=self._tier,
+                tier=tier,
                 messages=messages,
                 max_tokens=CODE_DISCOVERY_MAX_TOKENS,
                 tools=_TOOLS,
@@ -123,7 +159,7 @@ class CodeDiscoveryAgent:
             "content": "Tool call limit reached. Return your best result now as JSON.",
         })
         final = self._client.call_single(
-            tier=self._tier,
+            tier=tier,
             messages=messages,
             max_tokens=CODE_DISCOVERY_MAX_TOKENS,
         )

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
 
 from haive.adapters.pm.base import PMAdapter
 from haive.adapters.vcs.base import VCSAdapter
@@ -22,6 +21,7 @@ from haive.llm.model_client import ModelClient
 from haive.llm.tier import Tier
 from haive.llm.tier_config import TierConfig
 from haive.models.agent_output import ScaffoldAgentOutput
+from haive.models.discovery import classify_discovery_status
 from haive.models.enums import AgentRole, Complexity, TaskStatus
 from haive.models.review import ReviewVerdict
 from haive.models.state import ProjectState
@@ -30,7 +30,6 @@ from haive.observability.spans import task_span
 from haive.persistence.state_store import StateStore
 from haive.registry.agent_registry import AgentRegistry
 
-_SCAFFOLD_ROLES: frozenset[AgentRole] = frozenset({AgentRole.SCAFFOLD_AGENT})
 _MAX_API_ERRORS = 3
 _MIN_LINES_FOR_SHRINKAGE_CHECK = 20
 _MAX_ALLOWED_SHRINKAGE = 0.5
@@ -165,7 +164,7 @@ class TaskExecutor:
                     discovery_result = discovery_agent.discover(task, self._root, token_budget)
                     loaded_sections = file_index.load_sections(discovery_result, self._root, token_budget)
                     self._on_status(f"  [#{task.task_id}] loaded {len(loaded_sections)} section(s)")
-                    discovery_status = self._compute_discovery_status(discovery_result, task.agent_role)
+                    discovery_status = classify_discovery_status(discovery_result, task.agent_role)
                     discovery_note = (
                         "No existing code found for this task."
                         if discovery_status == "empty_unexpected"
@@ -363,17 +362,23 @@ class TaskExecutor:
                 return record
             finally:
                 vcs.checkout_branch(self._project_branch)
-        except Exception:
+        except Exception as exc:
             # Anything that escapes here — a git/adapter error before the
-            # tier loop even starts, or one re-raised from inside it (e.g.
-            # hitting _MAX_API_ERRORS) — would otherwise leave this task
-            # stuck at IN_PROGRESS forever: the scheduler only ever
-            # re-schedules PENDING tasks, and nothing else revisits an
-            # IN_PROGRESS one. Reset it so a later run can retry cleanly,
-            # then let the original exception keep propagating and be
-            # reported exactly as it is today.
-            pm.update_status(task.task_id, TaskStatus.PENDING)
-            raise
+            # tier loop even starts, a discovery failure, or one re-raised
+            # from inside the loop (e.g. hitting _MAX_API_ERRORS) — used to
+            # be allowed to keep propagating, which crashed the entire
+            # multi-task run: one task's unanticipated failure took down
+            # every other task in the wave and everything queued after it.
+            # Converged onto the same outcome as every other failure mode in
+            # this file instead: mark this one task for human review, record
+            # what happened, and let the rest of the run continue.
+            self._on_status(f"  [#{task.task_id}] unexpected error — needs human review: {exc}")
+            pm.add_comment(task.task_id, _format_unexpected_error_summary(exc))
+            pm.update_status(task.task_id, TaskStatus.NEEDS_HUMAN_REVIEW)
+            record.total_attempts = attempt_num
+            record.executor_end = _utcnow()
+            state_store.merge_task_record(project_id, task.task_id, record)
+            return record
 
     # ── private helpers ───────────────────────────────────────────────────────
 
@@ -464,17 +469,6 @@ class TaskExecutor:
         return full[start:]
 
     @staticmethod
-    def _compute_discovery_status(
-        result: object,
-        role: AgentRole,
-    ) -> Literal["found", "empty_expected", "empty_unexpected"]:
-        if result.sections:  # type: ignore[attr-defined]
-            return "found"
-        if role in _SCAFFOLD_ROLES:
-            return "empty_expected"
-        return "empty_unexpected"
-
-    @staticmethod
     def _build_dependency_outputs(task: Task, project_state: ProjectState) -> dict[str, str]:
         outputs: dict[str, str] = {}
         for dep_id in task.depends_on:
@@ -554,6 +548,16 @@ def _format_infeasible_summary(reason: str) -> str:
         "implementation, given the current code architecture — this is not an implementation "
         "mistake. The task's scope or acceptance criteria need to be revised.\n\n"
         f"Reviewer's reasoning: {reason}"
+    )
+
+
+def _format_unexpected_error_summary(exc: Exception) -> str:
+    return (
+        "**haive: unexpected error — needs human review**\n\n"
+        "This task hit an error outside the normal retry/review flow, before it could "
+        "produce a verdict (e.g. a git or adapter failure, or a discovery problem). "
+        "Investigate and either fix the underlying issue or re-run this task once resolved.\n\n"
+        f"Error: {type(exc).__name__}: {exc}"
     )
 
 
