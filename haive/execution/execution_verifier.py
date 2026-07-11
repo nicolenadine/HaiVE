@@ -80,7 +80,16 @@ class ExecutionVerifier:
 
     def _auto_detect_setup_command(self) -> str:
         if Path(self._root, "pyproject.toml").is_file():
-            return "uv sync"
+            # Bare "uv sync" only installs the base [project.dependencies]
+            # group -- it actively *uninstalls* anything declared under
+            # [project.optional-dependencies] (e.g. a "dev" group holding
+            # pytest) that happened to already be present, since it
+            # reconciles .venv to match only the default group. This crashed
+            # for real: every attempt's auto-detected "pytest -q" check
+            # failed with "No module named pytest" after the very first
+            # "uv sync" call uninstalled it. --all-extras installs every
+            # declared optional group, never leaving test/dev tooling out.
+            return "uv sync --all-extras"
         return ""
 
     def _resolve_python(self) -> str:

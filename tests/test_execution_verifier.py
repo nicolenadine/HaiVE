@@ -42,10 +42,16 @@ class TestPathSafety:
 
 
 class TestDependencySync:
-    def test_auto_detects_uv_sync_when_pyproject_present(self, tmp_path):
+    def test_auto_detects_uv_sync_all_extras_when_pyproject_present(self, tmp_path):
+        # Regression test: bare "uv sync" only installs the base
+        # [project.dependencies] group and actively *uninstalls* anything
+        # under [project.optional-dependencies] (e.g. a "dev" group holding
+        # pytest) that was already present -- this crashed for real, wiping
+        # pytest out of a project's .venv and failing every subsequent
+        # auto-detected test-command check with "No module named pytest".
         (tmp_path / "pyproject.toml").write_text("[project]\nname = \"x\"\n")
         verifier = make_verifier(tmp_path)
-        assert verifier._setup_command == "uv sync"
+        assert verifier._setup_command == "uv sync --all-extras"
 
     def test_no_setup_command_when_no_pyproject(self, tmp_path):
         verifier = make_verifier(tmp_path)

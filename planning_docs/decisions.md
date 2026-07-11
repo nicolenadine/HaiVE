@@ -822,3 +822,13 @@ Format per entry:
 **Rationale:** This wasn't a hypothetical edge case reserved for some future project — it was already true of the one real project this feature exists for. A dependency in an unparsed section isn't "approved," it's invisible: a future task adding a new tool to quickstart's `dev` group would have sailed through completely unchecked, the opposite of what this gate is for.
 
 **Tradeoff:** None — strictly closes a real gap in what was already supposed to be checked. Added regression tests (`TestOptionalDependencies`) covering both an unapproved and an approved dependency declared in an optional group.
+
+---
+
+### `dependency_sync`'s auto-detected command fixed to `uv sync --all-extras`, not bare `uv sync`
+
+**Decision:** `ExecutionVerifier._auto_detect_setup_command()` now returns `"uv sync --all-extras"` instead of bare `"uv sync"` when `pyproject.toml` is present and no explicit `Settings.verification_setup_command` is configured.
+
+**Rationale:** Caught live, from real `haive run-all` output on quickstart's M4: task #40 (and its recovery, #44) failed all four attempts with the auto-detected `pytest -q` command reporting `No module named pytest` — despite the import check passing every time, meaning the agent's actual code was fine. The attempt log's `command_results` (captured for exactly this kind of post-mortem) showed the real cause directly: the very first `uv sync` call in that attempt printed `Uninstalled 4 packages... - pytest==9.1.1` — bare `uv sync` reconciles `.venv` to match only `[project.dependencies]`, actively *removing* anything declared under `[project.optional-dependencies]` (quickstart's `pytest` lives in a `dev` group) if it happened to already be installed. Every subsequent attempt then failed the test-command stage for a reason having nothing to do with the code being reviewed — the harness had uninstalled its own test tool out from under itself. This is the exact same mistake made manually once already this session (recommending bare `uv sync` to the user, then finding and fixing it with `--all-extras` by hand) — now recurring because it had been encoded as `dependency_sync`'s own default, unnoticed until a real multi-attempt task exercised it.
+
+**Tradeoff:** `--all-extras` installs every declared optional-dependency group, not just a `dev`/`test`-named one — mildly broader than strictly necessary, but there is no reliable, project-agnostic convention for which extras group name is "the test one," and installing a superset is safe (never leaves test tooling missing) where installing a guessed subset risks repeating this exact bug under a different group name. Still overridable per-project via `Settings.verification_setup_command` for anything more specific.
