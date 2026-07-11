@@ -30,8 +30,11 @@ def _dependency_names(pyproject_content: str) -> set[str]:
         data = tomllib.loads(pyproject_content)
     except tomllib.TOMLDecodeError:
         return set()
-    deps = data.get("project", {}).get("dependencies", [])
-    return {_dependency_name(dep) for dep in deps if _dependency_name(dep)}
+    project = data.get("project", {})
+    specs = list(project.get("dependencies", []))
+    for group_specs in project.get("optional-dependencies", {}).values():
+        specs.extend(group_specs)
+    return {_dependency_name(dep) for dep in specs if _dependency_name(dep)}
 
 
 def _load_allowlist(root: str) -> set[str] | None:

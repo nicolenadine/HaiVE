@@ -91,6 +91,35 @@ class TestWithAllowlist:
         assert result.unapproved_dependencies == ["sketchy-pkg"]
 
 
+class TestOptionalDependencies:
+    def test_unapproved_dependency_in_optional_group_is_blocked(self, tmp_path):
+        old = '[project]\nname = "demo"\ndependencies = ["requests"]\n'
+        new = (
+            '[project]\nname = "demo"\ndependencies = ["requests"]\n\n'
+            '[project.optional-dependencies]\n'
+            'dev = ["sketchy-pkg>=1.0"]\n'
+        )
+        _write_pyproject(tmp_path, new)
+        _write_allowlist(tmp_path, ["requests"])
+        gate = DependencyApprovalGate(str(tmp_path))
+        result = gate.check(["pyproject.toml"], {"pyproject.toml": old})
+        assert result.approved is False
+        assert result.unapproved_dependencies == ["sketchy-pkg"]
+
+    def test_approved_dependency_in_optional_group_passes(self, tmp_path):
+        old = '[project]\nname = "demo"\ndependencies = ["requests"]\n'
+        new = (
+            '[project]\nname = "demo"\ndependencies = ["requests"]\n\n'
+            '[project.optional-dependencies]\n'
+            'dev = ["pytest>=7.0"]\n'
+        )
+        _write_pyproject(tmp_path, new)
+        _write_allowlist(tmp_path, ["requests", "pytest"])
+        gate = DependencyApprovalGate(str(tmp_path))
+        result = gate.check(["pyproject.toml"], {"pyproject.toml": old})
+        assert result.approved is True
+
+
 class TestDisabled:
     def test_disabled_gate_always_passes(self, tmp_path):
         _write_pyproject(tmp_path, _NEW_PYPROJECT_ADDS_UNAPPROVED)
